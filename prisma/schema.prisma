@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+  // output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//////////////////////
+// ENUMS
+//////////////////////
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+
+//////////////////////
+// USER
+//////////////////////
+
+model User {
+  id                            String     @id @default(cuid())
+  email                         String?    @unique
+  phone                         String?    @unique
+  name                          String
+  userName                      String?    @unique
+  password                      String?
+  district                      String?
+  upazila                       String?
+  avatarUrl                     String?
+  bio                           String?
+  dateOfBirth                   DateTime?
+  shippingAddress               String?
+  address                       String?
+  latitude                      Float?
+  longitude                     Float?
+  isProfileComplete             Boolean    @default(false)
+  type                          UserRole   @default(USER)
+  status                        Int?       @default(1)
+  isVerified                    Boolean    @default(false)
+  isNotificationOn              Boolean    @default(true)
+  securityAlert                 Boolean    @default(false)
+  emailNotification             Boolean    @default(false)
+  is_agreed_to_terms_and_policy Boolean?   @default(false)
+  firebaseToken                 String[]
+  createdAt                     DateTime   @default(now())
+  updatedAt                     DateTime   @updatedAt
+
+  // relations
+  verificationTokens verificationToken[]
+  notification       Notification[]
+  complain           Complain[]
+  activity           Activity[]
+
+  @@map("users")
+}
+
+
+
+model districts {
+  id        Int    @id
+  name      String @unique
+  latitude  Float
+  longitude Float
+
+  @@map("districts")
+}
+
+//////////////////////
+// NOTIFICATION
+//////////////////////
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  title     String
+  body      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+
+//////////////////////
+// VERIFICATION
+//////////////////////
+
+model verificationToken {
+  id        String   @id @default(uuid())
+  userId    String?
+  email     String?  @unique
+  token     String
+  expiresAt DateTime
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@map("verification_tokens")
+}
+
+enum complainStatus {
+  PENDING
+  PROCESSING
+  SOLVED
+}
+
+model Complain {
+  id        String         @id @default(cuid())
+  userId    String
+  ticket    String         @unique
+  title     String
+  body      String
+  category  String
+  solution  String?
+  status    complainStatus @default(PENDING)
+  isSeen    Boolean        @default(false)
+  user      User           @relation(fields: [userId], references: [id])
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum PolicyType {
+  PRIVACY_POLICY
+  TERMS_OF_SERVICE
+}
+
+model Legals {
+  id          String     @id @default(uuid())
+  type        PolicyType @default(PRIVACY_POLICY)
+  version     String
+  content     String     @db.Text
+  isActive    Boolean    @default(false)
+  publishedAt DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([type, version])
+  @@map("privacy_policies")
+}
