@@ -15,6 +15,7 @@ import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { UpdateTaskDto } from './dto/update-task.dto';
 
 @ApiTags('Tasks')
 @ApiBearerAuth()
@@ -33,6 +34,16 @@ export class TasksController {
   @ApiOperation({ summary: 'Get cursor-paginated tasks for logged-in user' })
   findAll(@Req() req: any, @Query() pagination: PaginationDto) {
     return this.tasksService.findAll(req.user.userId, pagination);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update details of a task' })
+  update(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateTaskDto,
+  ) {
+    return this.tasksService.update(req.user.userId, id, dto);
   }
 
   @Patch(':id/toggle')

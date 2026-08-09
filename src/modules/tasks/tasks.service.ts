@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
+import { UpdateTaskDto } from './dto/update-task.dto';
 
 @Injectable()
 export class TasksService {
@@ -79,6 +80,25 @@ export class TasksService {
       data: {
         isCompleted,
         completedAt: isCompleted ? new Date() : null,
+      },
+    });
+  }
+
+  
+  async update(userId: string, id: string, dto: UpdateTaskDto) {
+    const task = await this.prisma.task.findFirst({
+      where: { id, userId },
+    });
+
+    if (!task) {
+      throw new NotFoundException('Task not found or access denied');
+    }
+
+    return this.prisma.task.update({
+      where: { id },
+      data: {
+        ...dto,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       },
     });
   }

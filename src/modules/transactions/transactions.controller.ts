@@ -8,12 +8,14 @@ import {
   Query,
   UseGuards,
   Req,
+  Patch
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { UpdateTransactionDto } from './dto/update-transaction.dto';
 
 @ApiTags('Transactions')
 @ApiBearerAuth()
@@ -32,6 +34,16 @@ export class TransactionsController {
   @ApiOperation({ summary: 'Get cursor-paginated transaction ledger' })
   findAll(@Req() req: any, @Query() pagination: PaginationDto) {
     return this.transactionsService.findAll(req.user.userId, pagination);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update amount, category, type, or note of a transaction' })
+  update(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateTransactionDto,
+  ) {
+    return this.transactionsService.update(req.user.userId, id, dto);
   }
 
   @Delete(':id')

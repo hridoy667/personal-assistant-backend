@@ -77,6 +77,12 @@ enum BriefingType {
   WEEKLY
 }
 
+enum DeviceOs {
+  ANDROID
+  IOS
+  WEB
+}
+
 //////////////////////
 // USER MODEL
 //////////////////////
@@ -373,28 +379,31 @@ model HealthLog {
 
 // 7. ANDROID SCREEN TIME
 model ScreenTimeLog {
-  id                  String   @id @default(cuid())
+  id                  String   @id @default(uuid())
   userId              String
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date                DateTime @db.Date
   totalScreenTimeMins Int
   productivityScore   Float?
-  date                DateTime @db.Date
+  deviceOs            DeviceOs @default(ANDROID)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, date])
-  @@map("screen_time_logs")
 }
 
 model AppUsage {
-  id            String      @id @default(cuid())
+  id            String      @id @default(uuid())
   userId        String
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  packageName   String
-  appName       String
+  packageName   String?     // Nullable for iOS (Apple masks package names/bundle IDs)
+  appName       String?     // Nullable for iOS (Or category name like "Social Networking")
   category      AppCategory @default(NEUTRAL)
   timeSpentMins Int
   date          DateTime    @db.Date
+  createdAt     DateTime    @default(now())
 
-  @@map("app_usages")
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // 8. GMAIL INTEGRATION
@@ -419,7 +428,7 @@ model JournalEntry {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String?
-  content   String   @db.Text
+  content   String?   @db.Text
   audioUrl  String?
   mood      MoodLevel?
   createdAt DateTime @default(now())

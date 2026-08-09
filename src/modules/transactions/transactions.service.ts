@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
+import { UpdateTransactionDto } from './dto/update-transaction.dto';
 
 @Injectable()
 export class TransactionsService {
@@ -58,6 +59,24 @@ export class TransactionsService {
         hasNextPage: !!nextCursor,
       },
     };
+  }
+
+  async update(userId: string, id: string, dto: UpdateTransactionDto) {
+    const transaction = await this.prisma.transaction.findFirst({
+      where: { id, userId },
+    });
+
+    if (!transaction) {
+      throw new NotFoundException('Transaction record not found or access denied');
+    }
+
+    return this.prisma.transaction.update({
+      where: { id },
+      data: {
+        ...dto,
+        transactedAt: dto.transactedAt ? new Date(dto.transactedAt) : undefined,
+      },
+    });
   }
 
   async delete(userId: string, transactionId: string) {

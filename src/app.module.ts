@@ -18,6 +18,13 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { HabitsModule } from './modules/habits/habits.module';
 import { MoodModule } from './modules/mood/mood.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
+import { SkillsModule } from './modules/skills/skills.module';
+import { JournalModule } from './modules/journal/journal.module';
+import { RoutinesModule } from './modules/routines/routines.module';
+import { FinancePlanningModule } from './modules/finance-planning/finance-planning.module';
+import { HealthModule } from './modules/health/health.module';
+import { ScreenTimeModule } from './modules/screen-time/screen-time.module';
+import { GmailModule } from './modules/gmail/gmail.module';
 
 @Module({
   imports: [
@@ -53,7 +60,6 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
       name: 'mail_queue',
     }),
 
-    // Redis কনফিগারেশন
     RedisModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -73,6 +79,13 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
     HabitsModule,
     MoodModule,
     TransactionsModule,
+    SkillsModule,
+    JournalModule,
+    RoutinesModule,
+    FinancePlanningModule,
+    HealthModule,
+    ScreenTimeModule,
+    GmailModule,
   ],
   controllers: [AppController],
   providers: [AppService],

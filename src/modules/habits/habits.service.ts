@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateHabitDto, LogHabitDto } from './dto/create-habit.dto';
+import { UpdateHabitDto } from './dto/update-habit.dto';
 
 @Injectable()
 export class HabitsService {
@@ -58,6 +59,23 @@ export class HabitsService {
       });
 
       return { log, habit: updatedHabit };
+    });
+  }
+
+  async update(userId: string, id: string, dto: UpdateHabitDto) {
+    const habit = await this.prisma.habit.findFirst({
+      where: { id, userId },
+    });
+
+    if (!habit) {
+      throw new NotFoundException('Habit not found or access denied');
+    }
+
+    return this.prisma.habit.update({
+      where: { id },
+      data: {
+        ...dto,
+      },
     });
   }
 }

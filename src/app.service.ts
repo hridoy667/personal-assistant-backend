@@ -17,7 +17,7 @@ export class AppService implements OnModuleInit {
       await this.redis.set('nest_test', 'Redis is Alive!');
       const val = await this.redis.get('nest_test');
       console.log('🚀 Redis Connection Test:', val);
-    } catch (err) {
+    } catch (err:any) {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       console.error('❌ Redis Connection Failed:', err.message);
     }
