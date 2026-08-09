@@ -14,6 +14,8 @@ import { ComplainModule } from './modules/complain/complain.module';
 import { LegalModule } from './modules/legal/legal.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { TasksModule } from './modules/tasks/tasks.module';
+import { HabitsModule } from './modules/habits/habits.module';
 
 @Module({
   imports: [
@@ -65,6 +67,8 @@ import { ThrottlerModule } from '@nestjs/throttler';
     NotificationModule,
     ComplainModule,
     LegalModule,
+    TasksModule,
+    HabitsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

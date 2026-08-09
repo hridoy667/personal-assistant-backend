@@ -22,32 +22,4 @@ export class PaginationDto {
   @IsOptional()
   @IsString()
   search?: string;
-
-  @ApiPropertyOptional({
-    description: 'Filter products by category name or slug',
-  })
-  @IsOptional()
-  @IsString()
-  category?: string;
-
-  @ApiPropertyOptional({
-    description: 'Filter products by availability status (true or false)',
-  })
-  @IsOptional()
-  @Type(() => Boolean)
-  available?: boolean;
-
-  @ApiPropertyOptional({
-    description: 'Filter products by price range, e.g., "10-100"',
-  })
-  @IsOptional()
-  @IsString()
-  priceRange?: string;
-
-  @ApiPropertyOptional({
-    description: 'Filter products by delivery status',
-  })
-  @IsOptional()
-  @IsString()
-  deliveryStatus?: string;
 }

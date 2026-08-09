@@ -1,15 +1,16 @@
 generator client {
-  provider = "prisma-client-js"
-  // output   = "../generated/prisma"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  extensions = [pgvector(map: "vector")]
+  url        = env("DATABASE_URL")
 }
 
 //////////////////////
-// ENUMS
+// EXISTING ENUMS
 //////////////////////
 
 enum UserRole {
@@ -17,9 +18,67 @@ enum UserRole {
   ADMIN
 }
 
+enum complainStatus {
+  PENDING
+  PROCESSING
+  SOLVED
+}
+
+enum PolicyType {
+  PRIVACY_POLICY
+  TERMS_OF_SERVICE
+}
 
 //////////////////////
-// USER
+// PRODUCTIVITY ENUMS
+//////////////////////
+
+enum TaskPriority {
+  P1_URGENT
+  P2_HIGH
+  P3_MEDIUM
+  P4_LOW
+}
+
+enum MoodLevel {
+  LOW_ENERGY
+  ANXIOUS
+  BALANCED
+  HIGH_ENERGY
+}
+
+enum EnergyRequirement {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum HabitType {
+  BINARY
+  QUANTITATIVE
+}
+
+enum RoutineType {
+  MORNING
+  AFTERNOON
+  EVENING
+  CUSTOM
+}
+
+enum AppCategory {
+  PRODUCTIVE
+  NEUTRAL
+  DISTRACTING
+}
+
+enum BriefingType {
+  MORNING
+  EVENING
+  WEEKLY
+}
+
+//////////////////////
+// USER MODEL
 //////////////////////
 
 model User {
@@ -50,16 +109,35 @@ model User {
   createdAt                     DateTime   @default(now())
   updatedAt                     DateTime   @updatedAt
 
-  // relations
-  verificationTokens verificationToken[]
-  notification       Notification[]
-  complain           Complain[]
-  activity           Activity[]
+  // Gmail OAuth Integration Tokens
+  gmailRefreshToken             String?
+  gmailConnectedAt              DateTime?
+
+  // Relations - Existing
+  verificationTokens            verificationToken[]
+  notification                  Notification[]
+  complain                      Complain[]
+  activity                      Activity[]
+
+  // Relations - New Productivity Modules
+  tasks                         Task[]
+  habits                        Habit[]
+  routines                      Routine[]
+  moodLogs                      MoodLog[]
+  transactions                  Transaction[]
+  budgets                       Budget[]
+  savingsGoals                  SavingsGoal[]
+  healthLogs                    HealthLog[]
+  screenTimeLogs                ScreenTimeLog[]
+  appUsages                     AppUsage[]
+  syncedEmails                  SyncedEmail[]
+  journals                      JournalEntry[]
+  memories                      MemoryVault[]
+  aiBriefings                   AiBriefing[]
+  userSkills                    Skill[]
 
   @@map("users")
 }
-
-
 
 model districts {
   id        Int    @id
@@ -71,7 +149,7 @@ model districts {
 }
 
 //////////////////////
-// NOTIFICATION
+// EXISTING MODELS
 //////////////////////
 
 model Notification {
@@ -81,13 +159,8 @@ model Notification {
   body      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  user      User?    @relation(fields: [userId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
-
-
-//////////////////////
-// VERIFICATION
-//////////////////////
 
 model verificationToken {
   id        String   @id @default(uuid())
@@ -95,15 +168,9 @@ model verificationToken {
   email     String?  @unique
   token     String
   expiresAt DateTime
-  user      User?    @relation(fields: [userId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("verification_tokens")
-}
-
-enum complainStatus {
-  PENDING
-  PROCESSING
-  SOLVED
 }
 
 model Complain {
@@ -116,7 +183,7 @@ model Complain {
   solution  String?
   status    complainStatus @default(PENDING)
   isSeen    Boolean        @default(false)
-  user      User           @relation(fields: [userId], references: [id])
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 }
@@ -125,14 +192,9 @@ model Activity {
   id        String   @id @default(cuid())
   userId    String
   title     String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-}
-
-enum PolicyType {
-  PRIVACY_POLICY
-  TERMS_OF_SERVICE
 }
 
 model Legals {
@@ -147,4 +209,246 @@ model Legals {
 
   @@unique([type, version])
   @@map("privacy_policies")
+}
+
+///////////////////////////////////////////////////
+// NEW PRODUCTIVITY & GROWTH MODULES
+///////////////////////////////////////////////////
+
+model Task {
+  id               String             @id @default(cuid())
+  userId           String
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?            @db.Text
+  priority         TaskPriority       @default(P3_MEDIUM)
+  energyRequired   EnergyRequirement  @default(MEDIUM)
+  dueDate          DateTime?
+  estimatedMinutes Int?
+  isTopPriority    Boolean            @default(false)
+  isCompleted      Boolean            @default(false)
+  completedAt      DateTime?
+  recurrenceRule   String?            // e.g. "FREQ=DAILY", "REL=FAJR_AFTER"
+  category         String?
+  tags             String[]
+  
+  // Relations
+  parentId         String?
+  parentTask       Task?              @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks         Task[]             @relation("TaskSubtasks")
+  syncedEmailId    String?            @unique
+  syncedEmail      SyncedEmail?       @relation(fields: [syncedEmailId], references: [id])
+
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@map("tasks")
+}
+
+// 1. HABITS & SKILLS
+model Habit {
+  id             String      @id @default(cuid())
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  type           HabitType   @default(BINARY)
+  targetValue    Float       @default(1) // e.g. 1 time, or 2500 ml
+  unit           String?     // e.g. "ml", "pages", "mins"
+  currentStreak  Int         @default(0)
+  longestStreak  Int         @default(0)
+  streakSavers   Int         @default(1) // Monthly protection count
+  logs           HabitLog[]
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@map("habits")
+}
+
+model HabitLog {
+  id        String   @id @default(cuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  value     Float    @default(1)
+  loggedAt  DateTime @default(now())
+
+  @@map("habit_logs")
+}
+
+model Skill {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String   // e.g. "Master React Native"
+  targetHours    Float
+  loggedHours    Float    @default(0)
+  level          String?  // e.g. "Beginner", "Intermediate"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("skills")
+}
+
+// 3. ROUTINES
+model Routine {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  type      RoutineType @default(MORNING)
+  steps     Json        // Sequence of steps with duration and triggers
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+
+  @@map("routines")
+}
+
+// 5. FINANCE MANAGEMENT
+model Transaction {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Float
+  category    String
+  isExpense   Boolean  @default(true)
+  description String?
+  isRecurring Boolean  @default(false)
+  transactedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@map("transactions")
+}
+
+model Budget {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  String
+  limit     Float
+  month     Int      // 1-12
+  year      Int
+  createdAt DateTime @default(now())
+
+  @@map("budgets")
+}
+
+model SavingsGoal {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  targetAmount  Float
+  currentAmount Float    @default(0)
+  targetDate    DateTime?
+  createdAt     DateTime @default(now())
+
+  @@map("savings_goals")
+}
+
+// 6. HEALTH & WELLBEING
+model MoodLog {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mood      MoodLevel
+  note      String?
+  createdAt DateTime  @default(now())
+
+  @@map("mood_logs")
+}
+
+model HealthLog {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sleepHours     Float?
+  waterIntakeMl  Float?
+  weightKg       Float?
+  energyScore    Int?     // 1 to 10 scale
+  date           DateTime @db.Date
+
+  @@unique([userId, date])
+  @@map("health_logs")
+}
+
+// 7. ANDROID SCREEN TIME
+model ScreenTimeLog {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalScreenTimeMins Int
+  productivityScore   Float?
+  date                DateTime @db.Date
+
+  @@unique([userId, date])
+  @@map("screen_time_logs")
+}
+
+model AppUsage {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packageName   String
+  appName       String
+  category      AppCategory @default(NEUTRAL)
+  timeSpentMins Int
+  date          DateTime    @db.Date
+
+  @@map("app_usages")
+}
+
+// 8. GMAIL INTEGRATION
+model SyncedEmail {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gmailMessageId  String   @unique
+  sender          String
+  subject         String
+  snippet         String?
+  isActionRequired Boolean @default(false)
+  task            Task?
+  receivedAt      DateTime
+
+  @@map("synced_emails")
+}
+
+// 9. JOURNAL
+model JournalEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String?
+  content   String   @db.Text
+  audioUrl  String?
+  mood      MoodLevel?
+  createdAt DateTime @default(now())
+
+  @@map("journal_entries")
+}
+
+// 11. PERSONAL KNOWLEDGE & MEMORY (RAG ENABLED)
+model MemoryVault {
+  id        String                      @id @default(cuid())
+  userId    String
+  user      User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  String?                     // e.g. "Notes", "Key Dates", "Ideas"
+  content   String                      @db.Text
+  embedding Unsupported("vector(1536)")? // Set vector dimensions to match your embedding model (e.g. 1536 for OpenAI / 768 for Nomic)
+  createdAt DateTime                    @default(now())
+  updatedAt DateTime                    @updatedAt
+
+  @@map("memory_vault")
+}
+
+// 12. AI DAILY INTELLIGENCE
+model AiBriefing {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      BriefingType @default(MORNING)
+  content   Json         // Structured AI briefing outputs (Weather, Priorities, Financial recap, Insights)
+  createdAt DateTime     @default(now())
+
+  @@map("ai_briefings")
 }
