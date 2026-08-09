@@ -16,6 +16,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { HabitsModule } from './modules/habits/habits.module';
+import { MoodModule } from './modules/mood/mood.module';
+import { TransactionsModule } from './modules/transactions/transactions.module';
 
 @Module({
   imports: [
@@ -69,6 +71,8 @@ import { HabitsModule } from './modules/habits/habits.module';
     LegalModule,
     TasksModule,
     HabitsModule,
+    MoodModule,
+    TransactionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
