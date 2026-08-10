@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMoodLogDto } from './dto/create-mood.dto';
+import { UpdateMoodDto } from './dto/update-mood.dto';
 
 @Injectable()
 export class MoodService {
@@ -29,4 +30,22 @@ export class MoodService {
       orderBy: { createdAt: 'asc' },
     });
   }
+
+  async update(userId: string, id: string, dto: UpdateMoodDto) {
+    const moodLog = await this.prisma.moodLog.findFirst({
+      where: { id, userId },
+    });
+
+    if (!moodLog) {
+      throw new NotFoundException('Mood entry not found or access denied');
+    }
+
+    return this.prisma.moodLog.update({
+      where: { id },
+      data: {
+        ...dto,
+      },
+    });
+  }
+
 }
