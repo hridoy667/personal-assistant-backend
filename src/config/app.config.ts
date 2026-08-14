@@ -62,6 +62,20 @@ export default () => ({
     },
   },
 
+  ai: {
+    groq: {
+      apiKey: process.env.GROQ_API_KEY,
+      model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    },
+  },
+
+  weather: {
+    openweather: {
+      apiKey: process.env.OPENWEATHER_API_KEY,
+      apiUrl: process.env.OPENWEATHER_API_URL || 'https://api.openweathermap.org/data/2.5',
+    },
+  },
+
   payment: {
     stripe: {
       secret_key: process.env.STRIPE_SECRET_KEY,
