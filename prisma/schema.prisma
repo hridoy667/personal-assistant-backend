@@ -94,38 +94,59 @@ model User {
   name                          String
   userName                      String?    @unique
   password                      String?
-  district                      String?
-  upazila                       String?
   avatarUrl                     String?
   bio                           String?
   dateOfBirth                   DateTime?
-  shippingAddress               String?
-  address                       String?
+  gender                        Gender?
+
+  // Location & Timezone (Automated)
+  timezone                      String     @default("Asia/Dhaka")
+  district                      String?
+  upazila                       String?
   latitude                      Float?
   longitude                     Float?
+
+  // Physical Health & Metrics
+  height                        Float?     // in meters
+  weight                        Float?     // in kg
+  activityLevel                 ActivityLevel? @default(SEDENTARY)
+
+  // Modular Feature Preferences (Optional Modules)
+  enableIslamicFeatures         Boolean    @default(false)
+  enableMailAssistance          Boolean    @default(false)
+  enableFinanceTracker          Boolean    @default(true)
+  enableHealthTracking          Boolean    @default(true)
+  enableScreenTimeTracking      Boolean    @default(false)
+  enableAiBriefings             Boolean    @default(true)
+
+  // Profile & App Status
+  dailyTargetFocus              String?
   isProfileComplete             Boolean    @default(false)
   type                          UserRole   @default(USER)
   status                        Int?       @default(1)
   isVerified                    Boolean    @default(false)
+
+  // Notification Preferences
   isNotificationOn              Boolean    @default(true)
   securityAlert                 Boolean    @default(false)
   emailNotification             Boolean    @default(false)
   is_agreed_to_terms_and_policy Boolean?   @default(false)
   firebaseToken                 String[]
-  createdAt                     DateTime   @default(now())
-  updatedAt                     DateTime   @updatedAt
 
-  // Gmail OAuth Integration Tokens
+  // OAuth Integrations (Populated only if enableMailAssistance is true)
   gmailRefreshToken             String?
   gmailConnectedAt              DateTime?
 
-  // Relations - Existing
+  createdAt                     DateTime   @default(now())
+  updatedAt                     DateTime   @updatedAt
+
+  // Relations
   verificationTokens            verificationToken[]
   notification                  Notification[]
   complain                      Complain[]
   activity                      Activity[]
 
-  // Relations - New Productivity Modules
+  // Productivity & Tracking Relations
   tasks                         Task[]
   habits                        Habit[]
   routines                      Routine[]
@@ -143,6 +164,19 @@ model User {
   userSkills                    Skill[]
 
   @@map("users")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHTLY_ACTIVE
+  MODERATELY_ACTIVE
+  VERY_ACTIVE
 }
 
 model districts {

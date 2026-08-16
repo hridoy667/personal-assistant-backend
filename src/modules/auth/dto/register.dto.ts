@@ -1,130 +1,153 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsArray,
   IsBoolean,
+  IsDate,
   IsEmail,
   IsEnum,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Min,
 } from 'class-validator';
 
-export enum UserRole {
-  USER = 'USER',
-  FARMER = 'FARMER',
-  ADMIN = 'ADMIN',
+export enum Gender {
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  OTHER = 'OTHER',
 }
 
-export enum FarmType {
-  RICE = 'RICE',
-  VEGETABLE = 'VEGETABLE',
-  FISH = 'FISH',
-  MEAT = 'MEAT',
-  POULTRY = 'POULTRY',
-  DAIRY = 'DAIRY',
-  EGGS = 'EGGS',
-  FRUIT = 'FRUIT',
-  SHRIMP_CRAB = 'SHRIMP_CRAB',
-  FLOWER = 'FLOWER',
-  NURSERY = 'NURSERY',
-  GRAINS_PULSES = 'GRAINS_PULSES',
-  SPICES = 'SPICES',
-  HONEY = 'HONEY',
-  MUSHROOM = 'MUSHROOM',
-  AGRO_PROCESSING = 'AGRO_PROCESSING',
+export enum ActivityLevel {
+  SEDENTARY = 'SEDENTARY',
+  LIGHTLY_ACTIVE = 'LIGHTLY_ACTIVE',
+  MODERATELY_ACTIVE = 'MODERATELY_ACTIVE',
+  VERY_ACTIVE = 'VERY_ACTIVE',
 }
 
 export class RegisterDto {
-  @ApiProperty({ example: 'John' })
+  @ApiProperty({ example: 'John Doe' })
   @IsNotEmpty()
   @IsString()
   name!: string;
 
-  @ApiProperty({ example: 'john@example.com' })
+  @ApiPropertyOptional({ example: 'john@example.com' })
   @IsOptional()
   @IsEmail()
   email?: string;
-
-  @ApiProperty({ example: 'hello there!' })
-  @IsOptional()
-  @IsString()
-  bio?: string;
 
   @ApiProperty({ example: 'strongPassword123', minLength: 6 })
   @IsNotEmpty()
   @IsString()
   password!: string;
 
-  @ApiProperty({ example: '+8801700000000' })
-  @IsNotEmpty()
+  @ApiPropertyOptional({ example: '+8801700000000' })
+  @IsOptional()
   @IsString()
-  phone!: string;
+  phone?: string;
 
-  @ApiProperty({ example: 'Dhaka' })
-  @IsNotEmpty()
+  @ApiPropertyOptional({ example: 'hello there!' })
+  @IsOptional()
   @IsString()
-  district!: string;
+  bio?: string;
 
-  @ApiProperty({ example: 'Dhaka' })
+  // --- Location & Timezone (Automated via Mobile Client) ---
+
+  @ApiPropertyOptional({ example: 'Asia/Dhaka', default: 'Asia/Dhaka' })
+  @IsOptional()
+  @IsString()
+  timezone?: string = 'Asia/Dhaka';
+
+  @ApiPropertyOptional({ example: 'Dhaka' })
+  @IsOptional()
+  @IsString()
+  district?: string;
+
+  @ApiPropertyOptional({ example: 'Dhanmondi' })
   @IsOptional()
   @IsString()
   upazila?: string;
 
-  @ApiProperty({ required: false, type: Number })
+  // --- Physical Health Metrics ---
+
+  @ApiPropertyOptional({ example: '1998-05-15T00:00:00.000Z' })
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  dateOfBirth?: Date;
+
+  @ApiPropertyOptional({ enum: Gender, example: Gender.MALE })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
+
+  @ApiPropertyOptional({ example: 1.75, description: 'Height in meters' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  latitude?: number;
+  @Min(0.5)
+  height?: number;
 
-  @ApiProperty({ required: false, type: Number })
+  @ApiPropertyOptional({ example: 70.5, description: 'Weight in kg' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  longitude?: number;
+  @Min(1)
+  weight?: number;
 
-  @ApiProperty({ enum: UserRole, example: 'USER' })
-  @IsNotEmpty()
-  @IsEnum(UserRole)
-  type!: UserRole;
-
+  @ApiPropertyOptional({ enum: ActivityLevel, example: ActivityLevel.SEDENTARY })
   @IsOptional()
-  @IsString()
-  shopName?: string;
+  @IsEnum(ActivityLevel)
+  activityLevel?: ActivityLevel;
 
+  // --- Optional Modular Feature Flags ---
+
+  @ApiPropertyOptional({ example: false, default: false })
   @IsOptional()
-  @IsString()
-  shopDescription?: string;
-
-  @IsOptional()
-  @IsArray()
-  @IsEnum(FarmType, { each: true })
-  @ApiProperty({
-    example: ['VEGETABLE', 'FRUIT'],
-    enum: FarmType,
-    isArray: true,
-  })
-  @Transform(({ value }) => {
-    if (Array.isArray(value)) return value;
-    return value ? [value] : [];
-  })
-  farmTypes?: FarmType[];
-
-  @IsOptional()
-  @IsString()
-  location?: string;
-
-  @IsNotEmpty()
+  @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
-  is_agreed_to_terms_and_policy!:boolean
+  enableIslamicFeatures?: boolean = false;
 
+  @ApiPropertyOptional({ example: false, default: false })
   @IsOptional()
-  @IsString()
-  shippingAddress?: string;
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  enableMailAssistance?: boolean = false;
 
-  @ApiProperty({ type: 'string', format: 'binary', required: false })
+  @ApiPropertyOptional({ example: true, default: true })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  enableFinanceTracker?: boolean = true;
+
+  @ApiPropertyOptional({ example: true, default: true })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  enableHealthTracking?: boolean = true;
+
+  @ApiPropertyOptional({ example: false, default: false })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  enableScreenTimeTracking?: boolean = false;
+
+  @ApiPropertyOptional({ example: true, default: true })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  enableAiBriefings?: boolean = true;
+
+  // --- Terms & Profile Flags ---
+
+  @ApiProperty({ example: true })
+  @IsNotEmpty()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  is_agreed_to_terms_and_policy!: boolean;
+
+  @ApiPropertyOptional({ type: 'string', format: 'binary', required: false })
   @IsOptional()
   image?: any;
 }

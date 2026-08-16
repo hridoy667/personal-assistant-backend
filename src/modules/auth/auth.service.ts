@@ -12,7 +12,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { RegisterDto, UserRole } from './dto/register.dto';
+import { RegisterDto} from './dto/register.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { comparePassword, hashPassword } from './helper.util';
 import { generateAvatarUrl } from 'src/common/utils/fileUrl.util';
@@ -35,6 +35,7 @@ import path from 'path';
 import * as fs from 'fs';
 import { CompleteProfileDto } from './dto/oauth-register.dto';
 import { LoginDto } from './dto/login.dto';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -43,9 +44,9 @@ export class AuthService {
     private jwtService: JwtService,
     private readonly mailService: MailService,
     @InjectRedis() private readonly redis: Redis,
-  ) { }
+  ) {}
 
-  async checkPhoneExists(phone) {
+  async checkPhoneExists(phone: string) {
     const existingUser = await this.prisma.user.findFirst({
       where: { phone },
     });
@@ -57,93 +58,94 @@ export class AuthService {
   }
 
   async create(registerDto: RegisterDto, image?: Express.Multer.File) {
-    // 1. Check for existing conflicts
+    const emailToVerify = registerDto.email;
+
+    if (!emailToVerify) {
+      throw new BadRequestException('Email is required for registration.');
+    }
+
+    // 1. Check for existing user conflicts in DB
     const existingUser = await this.prisma.user.findFirst({
       where: {
-        OR: [{ email: registerDto.email }, { phone: registerDto.phone }],
+        OR: [
+          { email: emailToVerify },
+          ...(registerDto.phone ? [{ phone: registerDto.phone }] : []),
+        ],
       },
     });
 
     if (existingUser) {
-      if (existingUser.phone === registerDto.phone)
+      if (registerDto.phone && existingUser.phone === registerDto.phone) {
         throw new ConflictException('Phone number already exists');
-      if (existingUser.email === registerDto.email)
+      }
+      if (existingUser.email === emailToVerify) {
         throw new ConflictException('Email already exists');
+      }
     }
 
-    // 2. Automated Location Query via District Table Lookups
-    const districtLookup = await this.prisma.districts.findUnique({
-      where: { name: registerDto.district },
-    });
+    // 2. Automated Location Query via District Lookup (Optional)
+    let lat: number | null = null;
+    let lng: number | null = null;
 
-    if (!districtLookup) {
-      throw new NotFoundException(
-        `The district '${registerDto.district}' was not found in our records.`,
-      );
+    if (registerDto.district) {
+      const districtLookup = await this.prisma.districts.findUnique({
+        where: { name: registerDto.district },
+      });
+
+      if (!districtLookup) {
+        throw new NotFoundException(
+          `The district '${registerDto.district}' was not found in our records.`,
+        );
+      }
+
+      lat = districtLookup.latitude;
+      lng = districtLookup.longitude;
     }
 
-    const lat = districtLookup.latitude;
-    const lng = districtLookup.longitude;
-
-    // 3. Handle Image Processing using your utility
-    let avatarUrl: string | null = null;
+    // 3. Handle Image Processing (save filename only to storage)
+    let avatarFileName: string | null = null;
     if (image) {
-      const savedFileName = await processAndSaveImage(image, 'avatars');
-      avatarUrl = generateAvatarUrl(savedFileName);
+      avatarFileName = await processAndSaveImage(image, 'avatars');
     }
 
     // 4. Hash Password
     const hashedPassword = await hashPassword(registerDto.password);
 
-    // 5. Save directly using an Atomic Transaction
-    const newUser = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email: registerDto.email,
-          name: registerDto.name,
-          phone: registerDto.phone,
-          password: hashedPassword,
-          avatarUrl: avatarUrl,
-          district: registerDto.district,
-          latitude: lat,
-          longitude: lng,
-          address: registerDto.location,
-          is_agreed_to_terms_and_policy: registerDto.is_agreed_to_terms_and_policy,
-          isVerified: true,
-        },
-      });
+    // 5. Store complete temp payload in Redis for 15 minutes (900 seconds)
+    const tempUserData = {
+      ...registerDto,
+      password: hashedPassword,
+      avatarUrl: avatarFileName,
+      latitude: lat,
+      longitude: lng,
+    };
 
-      if (user) {
-        await tx.user.update({
-          where: {
-            id: user.id,
-          },
-          data: {
-            isProfileComplete: true,
-          }
-        })
-      }
+    await this.redis.set(
+      `temp_user:${emailToVerify}`,
+      JSON.stringify(tempUserData),
+      'EX',
+      900,
+    );
 
-      return user;
+    // 6. Generate OTP and send Email via UcodeRepository and MailService
+    const otp = await this.ucodeRepository.createOtp(emailToVerify);
+
+    await this.mailService.sendOtpCodeToEmail({
+      email: emailToVerify,
+      name: registerDto.name,
+      otp,
     });
 
-    // 6. Clean Return
     return {
       success: true,
-      message: 'Account created successfully.',
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        type: newUser.type,
-        phone: newUser.phone,
-      },
+      message: 'Verification code sent to your email. Please verify to complete registration.',
+      email: emailToVerify,
     };
   }
 
   async verifyEmail(verifydto: verifyDto) {
     try {
-      // Verify OTP
+      // 1. Verify OTP from repository/Redis
       const isValid = await this.ucodeRepository.verifyOtp(
         verifydto.email,
         verifydto.otp,
@@ -153,44 +155,80 @@ export class AuthService {
         throw new BadRequestException('Invalid or expired OTP');
       }
 
-      // Get temp data from Redis
+      // 2. Retrieve temporary registration data from Redis
       const tempUserDataStr = await this.redis.get(
         `temp_user:${verifydto.email}`,
       );
+
       if (!tempUserDataStr) {
         throw new ConflictException('Session expired. Please register again.');
       }
 
       const tempUserData = JSON.parse(tempUserDataStr);
 
-      // Create user in DB
-      const newUser = await this.prisma.user.create({
-        data: {
-          email: tempUserData.email,
-          name: tempUserData.name,
-          password: tempUserData.password,
-          avatarUrl: tempUserData.avatarUrl,
-          district: tempUserData.district,
-        },
+      // 3. Create complete User record inside an Atomic Transaction
+      const newUser = await this.prisma.$transaction(async (tx) => {
+        return await tx.user.create({
+          data: {
+            name: tempUserData.name,
+            email: tempUserData.email,
+            phone: tempUserData.phone,
+            password: tempUserData.password,
+            avatarUrl: tempUserData.avatarUrl,
+            bio: tempUserData.bio,
+
+            // Location & Timezone
+            timezone: tempUserData.timezone || 'Asia/Dhaka',
+            district: tempUserData.district,
+            upazila: tempUserData.upazila,
+            latitude: tempUserData.latitude,
+            longitude: tempUserData.longitude,
+
+            // Health Metrics
+            dateOfBirth: tempUserData.dateOfBirth ? new Date(tempUserData.dateOfBirth) : null,
+            gender: tempUserData.gender,
+            height: tempUserData.height,
+            weight: tempUserData.weight,
+            activityLevel: tempUserData.activityLevel,
+
+            // Feature Toggles
+            enableIslamicFeatures: tempUserData.enableIslamicFeatures ?? false,
+            enableMailAssistance: tempUserData.enableMailAssistance ?? false,
+            enableFinanceTracker: tempUserData.enableFinanceTracker ?? true,
+            enableHealthTracking: tempUserData.enableHealthTracking ?? true,
+            enableScreenTimeTracking: tempUserData.enableScreenTimeTracking ?? false,
+            enableAiBriefings: tempUserData.enableAiBriefings ?? true,
+
+            // Verification & Profile Status
+            is_agreed_to_terms_and_policy: tempUserData.is_agreed_to_terms_and_policy,
+            isVerified: true,
+            isProfileComplete: true,
+          },
+        });
       });
 
-      // Remove data from Redis so it can't be used again
+      // 4. Cleanup temp Redis key
       await this.redis.del(`temp_user:${verifydto.email}`);
 
-      // 5. RETURN success
+      const finalAvatarUrl = newUser.avatarUrl ? generateAvatarUrl(newUser.avatarUrl) : null;
+
       return {
         success: true,
         message: 'Email verified successfully. Account created.',
         user: {
           id: newUser.id,
           email: newUser.email,
+          name: newUser.name,
+          type: newUser.type,
+          phone: newUser.phone,
+          avatarUrl: finalAvatarUrl,
         },
       };
     } catch (error: any) {
-      // Rethrow if it's already a NestJS exception, otherwise wrap it
       if (
         error instanceof ConflictException ||
-        error instanceof BadRequestException
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
       ) {
         throw error;
       }
@@ -198,14 +236,14 @@ export class AuthService {
     }
   }
 
-  async resendOtp(email) {
+  async resendOtp(email: string) {
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
     });
     if (existingUser)
       throw new ConflictException('Email already verified. Please login.');
 
-    //Get temp data from Redis
+    // Get temp data from Redis
     const tempUserDataStr = await this.redis.get(`temp_user:${email}`);
     if (!tempUserDataStr) {
       throw new ConflictException('Session expired. Please register again.');
@@ -216,7 +254,7 @@ export class AuthService {
 
     await this.mailService.sendOtpCodeToEmail({
       email,
-      name: tempUserData.name,
+      name: tempUserData.name || 'User',
       otp,
     });
     return {
@@ -236,7 +274,6 @@ export class AuthService {
   async validateRefreshToken(refreshToken: string) {
     return validateRefreshToken(this.redis, this.jwtService, refreshToken);
   }
-
 
   async login(logindto: LoginDto) {
     const user = await this.prisma.user.findFirst({
@@ -259,7 +296,7 @@ export class AuthService {
     );
     if (!isPasswordValid) throw new BadRequestException('Invalid credentials');
 
-    // SAVE FIREBASE FCM TOKEN TO ARRAY ──
+    // SAVE FIREBASE FCM TOKEN TO ARRAY
     if (logindto.firebaseToken) {
       const tokenExists = user.firebaseToken?.includes(logindto.firebaseToken);
 
@@ -275,7 +312,6 @@ export class AuthService {
       }
     }
 
-    // Fetch shop info for farmers before creating tokens
     let shopInfo: {
       id: string;
       name: string;
@@ -313,49 +349,49 @@ export class AuthService {
   }
 
   async handleGoogleLogin(oauthUser: any) {
-  const user = await this.prisma.user.findUnique({
-    where: { email: oauthUser.email },
-  });
+    const user = await this.prisma.user.findUnique({
+      where: { email: oauthUser.email },
+    });
 
-  if (!user) {
-    throw new BadRequestException('User registration failed through Google OAuth');
+    if (!user) {
+      throw new BadRequestException('User registration failed through Google OAuth');
+    }
+
+    if (user.status !== 1) {
+      throw new ForbiddenException('Your account has been suspended by the admin');
+    }
+
+    let shopInfo: {
+      id: string;
+      name: string;
+      latitude: number | null;
+      longitude: number | null;
+    } | null = null;
+
+    const finalAvatarUrl = user.avatarUrl ? generateAvatarUrl(user.avatarUrl) : null;
+
+    const payload = {
+      sub: user.id,
+      type: user.type,
+      name: user.name,
+      avatarUrl: finalAvatarUrl,
+      district: user.district,
+      latitude: user.latitude,
+      longitude: user.longitude,
+      shop: shopInfo,
+    };
+
+    const accessToken = signAccessToken(this.jwtService, payload);
+    const refreshToken = signRefreshToken(this.jwtService, payload);
+
+    await this.saveRefreshToken(user.id, refreshToken);
+
+    return {
+      accessToken,
+      refreshToken,
+      isProfileComplete: user.isProfileComplete,
+    };
   }
-
-  if (user.status !== 1) {
-    throw new ForbiddenException('Your account has been suspended by the admin');
-  }
-
-  let shopInfo: {
-    id: string;
-    name: string;
-    latitude: number | null;
-    longitude: number | null;
-  } | null = null;
-
-  const finalAvatarUrl = user.avatarUrl ? generateAvatarUrl(user.avatarUrl) : null;
-
-  const payload = {
-    sub: user.id,
-    type: user.type,
-    name: user.name,
-    avatarUrl: finalAvatarUrl,
-    district: user.district,
-    latitude: user.latitude,
-    longitude: user.longitude,
-    shop: shopInfo,
-  };
-
-  const accessToken = signAccessToken(this.jwtService, payload);
-  const refreshToken = signRefreshToken(this.jwtService, payload);
-
-  await this.saveRefreshToken(user.id, refreshToken);
-
-  return {
-    accessToken,
-    refreshToken,
-    isProfileComplete: user.isProfileComplete,
-  };
-}
 
   async refreshToken(refreshToken: string) {
     const payload = await this.validateRefreshToken(refreshToken);
@@ -369,7 +405,6 @@ export class AuthService {
 
     if (!user) throw new BadRequestException('User not found');
 
-    // Fetch shop info for farmers before creating tokens
     let shopInfo: {
       id: string;
       name: string;
@@ -377,12 +412,14 @@ export class AuthService {
       longitude: number | null;
     } | null = null;
 
+    const finalAvatarUrl = user.avatarUrl ? generateAvatarUrl(user.avatarUrl) : null;
+
     const newPayload = {
       sub: user.id,
       type: user.type,
       name: user.name,
       email: user.email,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: finalAvatarUrl,
       district: user.district,
       latitude: user.latitude,
       longitude: user.longitude,
@@ -405,7 +442,7 @@ export class AuthService {
           name: user.name,
           email: user.email,
           type: user.type,
-          avatarUrl: user.avatarUrl,
+          avatarUrl: finalAvatarUrl,
           district: user.district,
           latitude: user.latitude,
           longitude: user.longitude,
@@ -413,52 +450,6 @@ export class AuthService {
         },
       },
     };
-  }
-
-  async getMe(userId: string) {
-    const cacheKey = `user:profile:${userId}`;
-
-    try {
-      const cachedProfile = await this.redis.get(cacheKey);
-      if (cachedProfile) {
-        return {
-          success: true,
-          message: 'User profile fetched successfully (from cache)',
-          data: JSON.parse(cachedProfile),
-        };
-      }
-    } catch (redisError) {
-      console.error('Redis error during fetch:', redisError);
-    }
-
-    const userRoleCheck = await this.prisma.user.findUnique({
-      where: { id: userId, status: 1 },
-      select: {
-        type: true,
-      },
-    });
-
-    if (!userRoleCheck) {
-      throw new NotFoundException('User not found or account is inactive');
-    }
-
-    let formattedData: any = null;
-
-    try {
-      await this.redis.set(cacheKey, JSON.stringify(formattedData), 'EX', 25000);
-    } catch (redisError) {
-      console.error('Redis error during set:', redisError);
-    }
-
-    return {
-      success: true,
-      message: 'User profile fetched successfully',
-      data: formattedData,
-    };
-  }
-
-  async logout(userId: string) {
-    return await this.revokeRefreshToken(userId);
   }
 
   async revokeRefreshToken(user_id: string) {
@@ -485,9 +476,54 @@ export class AuthService {
     }
   }
 
+  async getMe(userId: string) {
+    const cacheKey = `user:profile:${userId}`;
+
+    try {
+      const cachedProfile = await this.redis.get(cacheKey);
+      if (cachedProfile) {
+        return {
+          success: true,
+          message: 'User profile fetched successfully (from cache)',
+          data: JSON.parse(cachedProfile),
+        };
+      }
+    } catch (redisError) {
+      console.error('Redis error during fetch:', redisError);
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, status: 1 },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found or account is inactive');
+    }
+
+    const formattedData = {
+      ...user,
+      avatarUrl: user.avatarUrl ? generateAvatarUrl(user.avatarUrl) : null,
+    };
+
+    try {
+      await this.redis.set(cacheKey, JSON.stringify(formattedData), 'EX', 25000);
+    } catch (redisError) {
+      console.error('Redis error during set:', redisError);
+    }
+
+    return {
+      success: true,
+      message: 'User profile fetched successfully',
+      data: formattedData,
+    };
+  }
+
+  async logout(userId: string) {
+    return await this.revokeRefreshToken(userId);
+  }
+
   async updateProfile(userId: string, dto: any, file?: Express.Multer.File) {
     const result = await this.prisma.$transaction(async (tx) => {
-
       const currentUser = await tx.user.findUnique({
         where: { id: userId },
       });
@@ -534,7 +570,8 @@ export class AuthService {
           if (currentUser.avatarUrl) {
             const oldFilename =
               currentUser.avatarUrl.split('/avatars/')[1] ||
-              currentUser.avatarUrl.split('avatars-dir-token/')[1];
+              currentUser.avatarUrl.split('avatars-dir-token/')[1] ||
+              currentUser.avatarUrl;
             if (oldFilename) {
               const oldFilePath = path.join(
                 __dirname,
@@ -555,15 +592,20 @@ export class AuthService {
           }
 
           const savedFileName = await processAndSaveImage(file, 'avatars');
-          updateData.avatarUrl = generateAvatarUrl(savedFileName);
+          updateData.avatarUrl = savedFileName;
         } catch (imageError) {
           console.error('Failed to process incoming update avatar file payload:', imageError);
         }
       }
 
+      await tx.user.update({
+        where: { id: userId },
+        data: updateData,
+      });
+
       return {
         success: true,
-        message: 'Profile and shop settings updated successfully',
+        message: 'Profile and settings updated successfully',
       };
     });
 
@@ -579,96 +621,86 @@ export class AuthService {
   }
 
   async completeOAuthProfile(userId: string, dto: CompleteProfileDto, image?: Express.Multer.File) {
-  // ১. ইউজার এক্সিস্টেন্স চেক
-  const user = await this.prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  if (!user) {
-    throw new BadRequestException('User not found');
-  }
-
-  // ২. ডিস্ট্রিক্ট লুকআপ
-  const districtLookup = await this.prisma.districts.findFirst({
-    where: { name: dto.district },
-  });
-
-  if (!districtLookup) {
-    throw new NotFoundException(
-      `The district '${dto.district}' was not found in our records.`,
-    );
-  }
-
-  const lat = districtLookup.latitude ?? dto.latitude ?? null;
-  const lng = districtLookup.longitude ?? dto.longitude ?? null;
-
-  // 🟢 ৩. ইমেজ প্রসেসিং: ডাটাবেজের জন্য শুধু ফাইলনেম (savedFileName) স্টোর করব
-  let dbAvatarName: string | null = user.avatarUrl; 
-  if (image) {
-    dbAvatarName = await processAndSaveImage(image, 'avatars'); // e.g., '1784232361840-customericon2.webp'
-  }
-
-  try {
-    // ৪. ডাটাবেজ ট্রানজেকশন
-    const updatedUser = await this.prisma.$transaction(async (tx) => {
-      const usr = await tx.user.update({
-        where: { id: userId },
-        data: {
-          district: dto.district,
-          latitude: lat,
-          longitude: lng,
-          address: dto.location,
-          bio: dto.bio,
-          shippingAddress: dto.shippingAddress,
-          avatarUrl: dbAvatarName, // 🟢 ডাটাবেজে যাচ্ছে শুধু ফাইলনেম
-          isProfileComplete: true,
-        },
-      });
-
-      // ফারমার হলে ডিপেন্ডেন্ট রেকর্ড তৈরি
-      if (dto.type === 'FARMER') {
-        if (!dto.shopName) {
-          throw new BadRequestException('Shop name is required for farmers');
-        }
-      }
-
-      return usr;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
     });
 
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
 
-    // 🟢 ৬. পেলোড তৈরির সময় ফাইলনেমকে ফুল URL-এ কনভার্ট করা
-    const finalAvatarUrl = updatedUser.avatarUrl ? generateAvatarUrl(updatedUser.avatarUrl) : null;
+    const districtLookup = await this.prisma.districts.findFirst({
+      where: { name: dto.district },
+    });
 
-    // ৭. JWT পেলোড ও টোকেন জেনারেট
-    const payload = {
-      sub: updatedUser.id,
-      type: updatedUser.type,
-      name: updatedUser.name, 
-      avatarUrl: finalAvatarUrl, // 🟢 পেলোডে যাচ্ছে জেনারেটেড ফুল URL
-      district: updatedUser.district,
-      latitude: updatedUser.latitude,
-      longitude: updatedUser.longitude,
-    };
+    if (!districtLookup) {
+      throw new NotFoundException(
+        `The district '${dto.district}' was not found in our records.`,
+      );
+    }
 
-    const accessToken = signAccessToken(this.jwtService, payload);
-    const refreshToken = signRefreshToken(this.jwtService, payload);
+    const lat = districtLookup.latitude ?? dto.latitude ?? null;
+    const lng = districtLookup.longitude ?? dto.longitude ?? null;
 
-    await this.saveRefreshToken(updatedUser.id, refreshToken);
+    let dbAvatarName: string | null = user.avatarUrl;
+    if (image) {
+      dbAvatarName = await processAndSaveImage(image, 'avatars');
+    }
 
-    return {
-      success: true,
-      message: 'Profile completed successfully',
-      type: updatedUser.type,
-      data: {
-        accessToken,
-        refreshToken,
-      },
-    };
+    try {
+      const updatedUser = await this.prisma.$transaction(async (tx) => {
+        const usr = await tx.user.update({
+          where: { id: userId },
+          data: {
+            district: dto.district,
+            latitude: lat,
+            longitude: lng,
+            bio: dto.bio,
+            avatarUrl: dbAvatarName,
+            isProfileComplete: true,
+          },
+        });
 
-  } catch (error: any) {
-    throw new BadRequestException(
-      error.message || 'Failed to complete profile due to database error'
-    );
+        if (dto.type === 'FARMER') {
+          if (!dto.shopName) {
+            throw new BadRequestException('Shop name is required for farmers');
+          }
+        }
+
+        return usr;
+      });
+
+      const finalAvatarUrl = updatedUser.avatarUrl ? generateAvatarUrl(updatedUser.avatarUrl) : null;
+
+      const payload = {
+        sub: updatedUser.id,
+        type: updatedUser.type,
+        name: updatedUser.name,
+        avatarUrl: finalAvatarUrl,
+        district: updatedUser.district,
+        latitude: updatedUser.latitude,
+        longitude: updatedUser.longitude,
+      };
+
+      const accessToken = signAccessToken(this.jwtService, payload);
+      const refreshToken = signRefreshToken(this.jwtService, payload);
+
+      await this.saveRefreshToken(updatedUser.id, refreshToken);
+
+      return {
+        success: true,
+        message: 'Profile completed successfully',
+        type: updatedUser.type,
+        data: {
+          accessToken,
+          refreshToken,
+        },
+      };
+
+    } catch (error: any) {
+      throw new BadRequestException(
+        error.message || 'Failed to complete profile due to database error'
+      );
+    }
   }
-}
 }

@@ -3,7 +3,6 @@ import { PrismaService } from '../../modules/prisma/prisma.service'; // Ensure t
 
 @Injectable()
 export class UcodeRepository {
-  // Inject your existing PrismaService instead of "new PrismaClient()"
   constructor(private readonly prisma: PrismaService) {}
 
   async createOtp(email: string): Promise<string> {
@@ -17,6 +16,10 @@ export class UcodeRepository {
     });
 
     return token;
+  }
+
+  async generateAndSaveOtp(email: string): Promise<string> {
+    return this.createOtp(email);
   }
 
   async verifyOtp(email: string, token: string): Promise<boolean> {
