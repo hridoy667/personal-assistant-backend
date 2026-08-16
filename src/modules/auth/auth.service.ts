@@ -12,7 +12,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { RegisterDto} from './dto/register.dto';
+import { RegisterDto } from './dto/register.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { comparePassword, hashPassword } from './helper.util';
 import { generateAvatarUrl } from 'src/common/utils/fileUrl.util';
@@ -58,13 +58,18 @@ export class AuthService {
   }
 
   async create(registerDto: RegisterDto, image?: Express.Multer.File) {
+    console.log('\n========= [REGISTER] Step 1: Initializing Registration =========');
+    console.log('[DEBUG] Incoming payload:', JSON.stringify(registerDto, null, 2));
+
     const emailToVerify = registerDto.email;
 
     if (!emailToVerify) {
+      console.error('[DEBUG ERROR] Email was missing from registerDto!');
       throw new BadRequestException('Email is required for registration.');
     }
 
     // 1. Check for existing user conflicts in DB
+    console.log(`[DEBUG] Checking DB for duplicate user: ${emailToVerify}`);
     const existingUser = await this.prisma.user.findFirst({
       where: {
         OR: [
@@ -75,6 +80,7 @@ export class AuthService {
     });
 
     if (existingUser) {
+      console.warn('[DEBUG WARNING] User already exists in DB:', existingUser.email);
       if (registerDto.phone && existingUser.phone === registerDto.phone) {
         throw new ConflictException('Phone number already exists');
       }
@@ -88,11 +94,13 @@ export class AuthService {
     let lng: number | null = null;
 
     if (registerDto.district) {
+      console.log(`[DEBUG] Querying district coordinates for: ${registerDto.district}`);
       const districtLookup = await this.prisma.districts.findUnique({
         where: { name: registerDto.district },
       });
 
       if (!districtLookup) {
+        console.warn(`[DEBUG WARNING] District '${registerDto.district}' not found.`);
         throw new NotFoundException(
           `The district '${registerDto.district}' was not found in our records.`,
         );
@@ -100,15 +108,19 @@ export class AuthService {
 
       lat = districtLookup.latitude;
       lng = districtLookup.longitude;
+      console.log(`[DEBUG] District matched: Lat=${lat}, Lng=${lng}`);
     }
 
-    // 3. Handle Image Processing (save filename only to storage)
+    // 3. Handle Image Processing
     let avatarFileName: string | null = null;
     if (image) {
+      console.log('[DEBUG] Processing avatar file upload...');
       avatarFileName = await processAndSaveImage(image, 'avatars');
+      console.log('[DEBUG] Saved avatar filename:', avatarFileName);
     }
 
     // 4. Hash Password
+    console.log('[DEBUG] Hashing user password...');
     const hashedPassword = await hashPassword(registerDto.password);
 
     // 5. Store complete temp payload in Redis for 15 minutes (900 seconds)
@@ -120,21 +132,32 @@ export class AuthService {
       longitude: lng,
     };
 
+    const redisKey = `temp_user:${emailToVerify}`;
+    console.log(`[DEBUG] Saving temporary user data to Redis under key: ${redisKey}`);
+    
     await this.redis.set(
-      `temp_user:${emailToVerify}`,
+      redisKey,
       JSON.stringify(tempUserData),
       'EX',
       900,
     );
 
-    // 6. Generate OTP and send Email via UcodeRepository and MailService
-    const otp = await this.ucodeRepository.createOtp(emailToVerify);
+    // Verify key insertion immediately
+    const checkRedis = await this.redis.get(redisKey);
+    console.log(`[DEBUG] Redis Save Status: ${checkRedis ? 'SUCCESS' : 'FAILED'}`);
 
+    // 6. Generate OTP and send Email via UcodeRepository and MailService
+    console.log(`[DEBUG] Generating OTP for ${emailToVerify}...`);
+    const otp = await this.ucodeRepository.createOtp(emailToVerify);
+    console.log(`[DEBUG] Generated OTP Code: ${otp}`);
+
+    console.log('[DEBUG] Sending verification email via MailService...');
     await this.mailService.sendOtpCodeToEmail({
       email: emailToVerify,
       name: registerDto.name,
       otp,
     });
+    console.log('========= [REGISTER] Step 1 Complete: Verification Email Sent =========\n');
 
     return {
       success: true,
@@ -144,31 +167,42 @@ export class AuthService {
   }
 
   async verifyEmail(verifydto: verifyDto) {
+    console.log('\n========= [VERIFY OTP] Step 2: Verifying Email =========');
+    console.log('[DEBUG] Verification DTO payload:', verifydto);
+
     try {
       // 1. Verify OTP from repository/Redis
+      console.log(`[DEBUG] Validating OTP (${verifydto.otp}) for ${verifydto.email}...`);
       const isValid = await this.ucodeRepository.verifyOtp(
         verifydto.email,
         verifydto.otp,
       );
+
+      console.log(`[DEBUG] OTP Validation Result: ${isValid ? 'VALID' : 'INVALID'}`);
 
       if (!isValid) {
         throw new BadRequestException('Invalid or expired OTP');
       }
 
       // 2. Retrieve temporary registration data from Redis
-      const tempUserDataStr = await this.redis.get(
-        `temp_user:${verifydto.email}`,
-      );
+      const redisKey = `temp_user:${verifydto.email}`;
+      console.log(`[DEBUG] Fetching temporary registration data from Redis key: ${redisKey}`);
+      
+      const tempUserDataStr = await this.redis.get(redisKey);
 
       if (!tempUserDataStr) {
+        console.error(`[DEBUG ERROR] No temporary data found in Redis for key: ${redisKey}`);
         throw new ConflictException('Session expired. Please register again.');
       }
 
       const tempUserData = JSON.parse(tempUserDataStr);
+      console.log('[DEBUG] Found temp user data in Redis:', JSON.stringify(tempUserData, null, 2));
 
       // 3. Create complete User record inside an Atomic Transaction
+      console.log('[DEBUG] Starting Prisma transaction to insert user into PostgreSQL/Supabase...');
+      
       const newUser = await this.prisma.$transaction(async (tx) => {
-        return await tx.user.create({
+        const created = await tx.user.create({
           data: {
             name: tempUserData.name,
             email: tempUserData.email,
@@ -205,12 +239,18 @@ export class AuthService {
             isProfileComplete: true,
           },
         });
+        return created;
       });
 
+      console.log('[DEBUG SUCCESS] User record created in Database! ID:', newUser.id);
+
       // 4. Cleanup temp Redis key
-      await this.redis.del(`temp_user:${verifydto.email}`);
+      console.log(`[DEBUG] Deleting temp Redis key: ${redisKey}`);
+      await this.redis.del(redisKey);
 
       const finalAvatarUrl = newUser.avatarUrl ? generateAvatarUrl(newUser.avatarUrl) : null;
+
+      console.log('========= [VERIFY OTP] Step 2 Complete: Account Ready =========\n');
 
       return {
         success: true,
@@ -225,6 +265,7 @@ export class AuthService {
         },
       };
     } catch (error: any) {
+      console.error('[DEBUG ERROR] Failure inside verifyEmail:', error);
       if (
         error instanceof ConflictException ||
         error instanceof BadRequestException ||
@@ -237,6 +278,7 @@ export class AuthService {
   }
 
   async resendOtp(email: string) {
+    console.log(`[DEBUG] Resending OTP to: ${email}`);
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
     });
@@ -246,6 +288,7 @@ export class AuthService {
     // Get temp data from Redis
     const tempUserDataStr = await this.redis.get(`temp_user:${email}`);
     if (!tempUserDataStr) {
+      console.error(`[DEBUG ERROR] Resend OTP failed. No temp key found for: ${email}`);
       throw new ConflictException('Session expired. Please register again.');
     }
 
@@ -276,6 +319,7 @@ export class AuthService {
   }
 
   async login(logindto: LoginDto) {
+    console.log(`[DEBUG] Login attempt for: ${logindto.email}`);
     const user = await this.prisma.user.findFirst({
       where: {
         email: logindto.email,
@@ -533,10 +577,7 @@ export class AuthService {
       }
 
       const {
-        farmTypes,
         image,
-        shopName,
-        shopDescription,
         dateOfBirth,
         upazila,
         district,
@@ -660,12 +701,6 @@ export class AuthService {
             isProfileComplete: true,
           },
         });
-
-        if (dto.type === 'FARMER') {
-          if (!dto.shopName) {
-            throw new BadRequestException('Shop name is required for farmers');
-          }
-        }
 
         return usr;
       });

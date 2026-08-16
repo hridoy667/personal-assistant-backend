@@ -15,17 +15,17 @@ console.log('DATABASE_URL at boot:', process.env.DATABASE_URL);
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  //Global Prefix
+  // Global Prefix
   app.setGlobalPrefix('api');
 
-  // Validation: Transforms plain objects to DTO classes and strips extra fields
+  // Validation
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       transform: true, 
       forbidNonWhitelisted: true,
       transformOptions: {
-        enableImplicitConversion: true, // This helps with automatic type casting
+        enableImplicitConversion: true,
       },
     }),
   );
@@ -33,25 +33,24 @@ async function bootstrap() {
   const isProduction = process.env.PRODUCTION_MODE === 'true';
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
+  // Updated CORS configuration
   app.enableCors({
-    // In production, we strictly allow only our frontend URL
-    // In development, we can allow localhost or even '*' if needed
-    origin: isProduction ? frontendUrl : [frontendUrl, 'http://localhost:3000'],
+    origin: isProduction 
+      ? [frontendUrl] 
+      : true, // `true` dynamically allows any origin in development (essential for Expo/Mobile devices)
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true, // Crucial for sending JWTs in cookies if you switch later
+    credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Cookie Parser: Essential for secure Refresh Tokens later
-  // app.use(cookieParser());
-
+  // Serve Static Assets
   app.useStaticAssets(join(process.cwd(), 'public'), {
     prefix: '/public',
   });
 
-  // Swagger setup...
+  // Swagger setup
   const options = new DocumentBuilder()
-    .setTitle(`${process.env.APP_NAME} API`)
+    .setTitle(`${process.env.APP_NAME || 'App'} API`)
     .setVersion('1.0')
     .addBearerAuth()
     .build();
@@ -62,12 +61,10 @@ async function bootstrap() {
 
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  app.useStaticAssets('public');
-
-  // Default 5000 so Next.js can use 3000; matches frontend getApiBaseUrl() fallback.
   const port = process.env.PORT ?? 5000;
-  await app.listen(port);
+  
+  // Binding to '0.0.0.0' allows connections from devices on your local network
+  await app.listen(port, '0.0.0.0');
+  console.log(`Server running on http://192.168.1.4:${port}/api`);
 }
 bootstrap();
-
-
