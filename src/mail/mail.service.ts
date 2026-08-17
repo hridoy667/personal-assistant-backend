@@ -16,7 +16,7 @@ export class MailService {
         'sendOtp', // Job name
         {
           ...data,
-          appName: process.env.APP_NAME || 'Signal Clone',
+          appName: process.env.APP_NAME || 'EVO',
         },
         {
           attempts: 3, // If SMTP fails, try 3 times

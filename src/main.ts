@@ -30,17 +30,12 @@ async function bootstrap() {
     }),
   );
 
-  const isProduction = process.env.PRODUCTION_MODE === 'true';
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-
-  // Updated CORS configuration
+  // CORS configuration updated to explicitly handle custom headers and credentials
   app.enableCors({
-    origin: isProduction 
-      ? [frontendUrl] 
-      : true, // `true` dynamically allows any origin in development (essential for Expo/Mobile devices)
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    origin: true, // Allows requests from mobile app (Metro/Expo, local IP, or emulators)
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
   });
 
   // Serve Static Assets
@@ -63,8 +58,8 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 5000;
   
-  // Binding to '0.0.0.0' allows connections from devices on your local network
+  // Bind to '0.0.0.0' for local network availability
   await app.listen(port, '0.0.0.0');
-  console.log(`Server running on http://192.168.1.4:${port}/api`);
+  console.log(`Server running on http://0.0.0.0:${port}/api`);
 }
 bootstrap();

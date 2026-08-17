@@ -22,23 +22,30 @@ export class UcodeRepository {
     return this.createOtp(email);
   }
 
-  async verifyOtp(email: string, token: string): Promise<boolean> {
-    const record = await this.prisma.verificationToken.findUnique({
-      where: { email },
-    });
+  // ucode.repository.ts
+async verifyOtp(email: string, token: string): Promise<boolean> {
+  const record = await this.prisma.verificationToken.findUnique({
+    where: { email },
+  });
 
-    if (!record) throw new BadRequestException('Invalid or expired code');
-
-    if (new Date() > record.expiresAt) {
-      await this.prisma.verificationToken.delete({ where: { email } });
-      throw new BadRequestException('Code has expired');
-    }
-
-    if (record.token !== token) {
-      throw new BadRequestException('Invalid code');
-    }
-
-    await this.prisma.verificationToken.delete({ where: { email } });
-    return true;
+  if (!record) {
+    throw new BadRequestException('Invalid or expired code');
   }
+
+  if (new Date() > record.expiresAt) {
+    await this.prisma.verificationToken.delete({ where: { email } });
+    throw new BadRequestException('Code has expired');
+  }
+
+  // Ensure string types and trim whitespace
+  const storedToken = String(record.token).trim();
+  const inputToken = String(token).trim();
+
+  if (storedToken !== inputToken) {
+    throw new BadRequestException('Invalid code');
+  }
+
+  await this.prisma.verificationToken.delete({ where: { email } });
+  return true;
+}
 }

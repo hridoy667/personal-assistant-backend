@@ -24,7 +24,7 @@ export class MailProcessor extends WorkerHost {
           to: email,
           subject: 'Email Verification Code',
           template: './email-verification',
-          context: { name, otp, appName: 'Signal' },
+          context: { name, otp, appName: 'EVO' },
         });
         this.logger.log(`OTP Email sent to ${email}`);
       }
