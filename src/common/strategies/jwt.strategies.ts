@@ -5,12 +5,19 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 
 interface JwtPayload {
   sub: string;
-  type: string;
+  type?: string;
   name: string;
-  avatarUrl: string;
+  avatarUrl: string | null;
   district: string;
-  latitude: number;
-  longitude: number;
+  timzone?: string;
+  latitude: number | null;
+  longitude: number | null;
+  enableIslamicFeatures?: boolean;
+  enableMailAssistance?: boolean;
+  enableFinanceTracker?: boolean;
+  enableHealthTracking?: boolean;
+  enableScreenTimeTracking?: boolean;
+  enableAiBriefings?: boolean;
   shop?: any;
 }
 
@@ -31,8 +38,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       name: payload.name,
       avatarUrl: payload.avatarUrl,
       district: payload.district,
+      timezone: payload.timzone,
       latitude: payload.latitude,
       longitude: payload.longitude,
+      enableIslamicFeatures: payload.enableIslamicFeatures,
+      enableMailAssistance: payload.enableMailAssistance,
+      enableFinanceTracker: payload.enableFinanceTracker,
+      enableHealthTracking: payload.enableHealthTracking,
+      enableScreenTimeTracking: payload.enableScreenTimeTracking,
+      enableAiBriefings: payload.enableAiBriefings,
       shop: payload.shop,
     };
   }

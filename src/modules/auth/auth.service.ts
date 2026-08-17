@@ -314,24 +314,22 @@ export class AuthService {
       }
     }
 
-    let shopInfo: {
-      id: string;
-      name: string;
-      latitude: number | null;
-      longitude: number | null;
-    } | null = null;
-
     const finalAvatarUrl = user.avatarUrl ? generateAvatarUrl(user.avatarUrl) : null;
 
     const payload = {
       sub: user.id,
-      type: user.type,
       name: user.name,
       avatarUrl: finalAvatarUrl,
       district: user.district,
+      timzone: user.timezone,
       latitude: user.latitude,
       longitude: user.longitude,
-      shop: shopInfo,
+      enableIslamicFeatures: user.enableIslamicFeatures,
+      enableMailAssistance: user.enableMailAssistance,
+      enableFinanceTracker: user.enableFinanceTracker,
+      enableHealthTracking: user.enableHealthTracking,
+      enableScreenTimeTracking: user.enableScreenTimeTracking,
+      enableAiBriefings: user.enableAiBriefings
     };
 
     const accessToken = signAccessToken(this.jwtService, payload);
