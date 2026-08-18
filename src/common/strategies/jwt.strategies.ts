@@ -18,7 +18,6 @@ interface JwtPayload {
   enableHealthTracking?: boolean;
   enableScreenTimeTracking?: boolean;
   enableAiBriefings?: boolean;
-  shop?: any;
 }
 
 @Injectable()
@@ -47,7 +46,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       enableHealthTracking: payload.enableHealthTracking,
       enableScreenTimeTracking: payload.enableScreenTimeTracking,
       enableAiBriefings: payload.enableAiBriefings,
-      shop: payload.shop,
     };
   }
 }

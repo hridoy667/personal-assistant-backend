@@ -9,17 +9,21 @@ export class TasksService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateTaskDto) {
-    return this.prisma.task.create({
+    await this.prisma.task.create({
       data: {
         userId,
         ...dto,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
       },
     });
+    return {
+      success:true,
+      message:"Task Created Successfully"
+    }
   }
 
   async findAll(userId: string, pagination: PaginationDto) {
-    const { cursor, limit = 10, search } = pagination;
+    const { cursor, limit = 4, search } = pagination;
 
     const where: any = { userId };
     if (search) {
@@ -34,7 +38,11 @@ export class TasksService {
       take: limit + 1, // Fetch 1 extra item to check for next page
       cursor: cursor ? { id: cursor } : undefined,
       skip: cursor ? 1 : 0,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { dueDate: 'asc' },   // 1. Sort by Date first (earliest due date first)
+        { priority: 'asc' },  // 2. Sort by Priority second (P1_URGENT -> P2_HIGH -> P3_MEDIUM -> P4_LOW)
+        { id: 'asc' },        // 3. Tie-breaker for stable cursor-based pagination
+      ],
       select: {
         id: true,
         title: true,
@@ -56,11 +64,32 @@ export class TasksService {
     }
 
     return {
+      success: true,
       data: tasks,
       meta: {
         nextCursor,
         hasNextPage: !!nextCursor,
       },
+    };
+  }
+
+  async getOne(userId: string, id: string) {
+    const task = await this.prisma.task.findFirst({
+      where: {
+        id,
+        userId,
+      },
+    });
+
+    if (!task) {
+      throw new NotFoundException(
+        'Task not found or you do not have permission to access it',
+      );
+    }
+
+    return {
+      success: true,
+      task,
     };
   }
 
@@ -94,13 +123,19 @@ export class TasksService {
       throw new NotFoundException('Task not found or access denied');
     }
 
-    return this.prisma.task.update({
+    await this.prisma.task.update({
       where: { id },
       data: {
         ...dto,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       },
     });
+
+    return{
+      success:true,
+      message:"Task updated successfully"
+    }
+
   }
 
   async delete(userId: string, taskId: string) {
@@ -113,8 +148,12 @@ export class TasksService {
       throw new NotFoundException('Task not found');
     }
 
-    return this.prisma.task.delete({
+    await this.prisma.task.delete({
       where: { id: taskId },
     });
+    return{
+      success:true,
+      message:"Task deleted successfully"
+    }
   }
 }

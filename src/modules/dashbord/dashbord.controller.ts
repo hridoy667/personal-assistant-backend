@@ -10,7 +10,7 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 @Controller('dashboard')
 @UseGuards(JwtAuthGuard)
 export class DashbordController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(private readonly dashboardService: DashboardService) { }
 
   @Get()
   async dashboard(@Req() req: any) {
@@ -19,8 +19,21 @@ export class DashbordController {
   }
 
   @Get('weather')
-  async getWeather(@Req() req: any) {
+  async getWeather(
+    @Req() req: any,
+    @Query('lat') lat?: string,
+    @Query('lon') lon?: string,
+  ) {
     const userId = req.user?.userId;
-    return this.dashboardService.getWeatherByPlace(userId);
+    const latitude = lat ? parseFloat(lat) : undefined;
+    const longitude = lon ? parseFloat(lon) : undefined;
+
+    return this.dashboardService.getWeatherByPlace(userId, latitude, longitude);
+  }
+
+  @Get('ayat')
+  async getAyat(@Req() req: any){
+    const userId=req.user?.userId;
+    return this.dashboardService.getQuranAyat(userId)
   }
 }

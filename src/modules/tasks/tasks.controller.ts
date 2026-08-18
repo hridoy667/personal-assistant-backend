@@ -36,6 +36,15 @@ export class TasksController {
     return this.tasksService.findAll(req.user.userId, pagination);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Get single task for logged-in user' })
+  async getOne(
+    @Req() req: any, 
+    @Param('id') id: string,
+  ) {
+    const userId = req.user.userId;
+    return await this.tasksService.getOne(userId, id);
+  }
   @Patch(':id')
   @ApiOperation({ summary: 'Update details of a task' })
   update(
