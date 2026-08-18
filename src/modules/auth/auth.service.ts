@@ -494,6 +494,30 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId, status: 1 },
+      select:{
+        email:true,
+        phone:true,
+        name:true,
+        avatarUrl:true,
+        bio:true,
+        dateOfBirth:true,
+        gender:true,
+        timezone:true,
+        district:true,
+        upazila:true,
+        height:true,
+        weight:true,
+        activityLevel:true,
+        enableAiBriefings:true,
+        enableFinanceTracker:true,
+        enableHealthTracking:true,
+        enableIslamicFeatures:true,
+        enableMailAssistance:true,
+        enableScreenTimeTracking:true,
+        dailyTargetFocus:true,
+        isNotificationOn:true,
+        emailNotification:true,
+      }
     });
 
     if (!user) {
