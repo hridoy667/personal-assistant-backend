@@ -24,11 +24,7 @@ import {
 } from 'src/common/utils/fileUrl.util';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
-import {
-  startOfMonth,
-  endOfMonth,
-  subMonths
-} from 'date-fns';
+
 
 
 @Injectable()

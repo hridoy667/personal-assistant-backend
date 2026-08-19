@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTaskDto } from './dto/create-task.dto';
-import { PaginationDto } from 'src/common/dtos/pagination.dto';
+import { PaginationDto,TaskStatusFilter } from 'src/common/dtos/pagination.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async create(userId: string, dto: CreateTaskDto) {
     await this.prisma.task.create({
@@ -17,49 +17,65 @@ export class TasksService {
       },
     });
     return {
-      success:true,
-      message:"Task Created Successfully"
+      success: true,
+      message: "Task Created Successfully"
     }
   }
 
   async findAll(userId: string, pagination: PaginationDto) {
-    const { cursor, limit = 4, search } = pagination;
+    const { cursor, limit = 10, search, status } = pagination;
 
+    // 1. Build Dynamic Where Condition
     const where: any = { userId };
+
+    // Status Filter (isCompleted check)
+    if (status === TaskStatusFilter.PENDING) {
+      where.isCompleted = false;
+    } else if (status === TaskStatusFilter.COMPLETED) {
+      where.isCompleted = true;
+    }
+
+    // Search Query Filter
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
         { category: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
       ];
     }
 
-    const tasks = await this.prisma.task.findMany({
-      where,
-      take: limit + 1, // Fetch 1 extra item to check for next page
-      cursor: cursor ? { id: cursor } : undefined,
-      skip: cursor ? 1 : 0,
-      orderBy: [
-        { dueDate: 'asc' },   // 1. Sort by Date first (earliest due date first)
-        { priority: 'asc' },  // 2. Sort by Priority second (P1_URGENT -> P2_HIGH -> P3_MEDIUM -> P4_LOW)
-        { id: 'asc' },        // 3. Tie-breaker for stable cursor-based pagination
-      ],
-      select: {
-        id: true,
-        title: true,
-        priority: true,
-        energyRequired: true,
-        isCompleted: true,
-        isTopPriority: true,
-        dueDate: true,
-        category: true,
-        tags: true,
-        createdAt: true,
-      },
-    });
+    // 2. Execute parallel queries: Fetch Items + Total Count matching the current filter
+    const [total, tasks] = await Promise.all([
+      this.prisma.task.count({ where }),
+      this.prisma.task.findMany({
+        where,
+        take: limit + 1, // Fetch 1 extra item to calculate next page cursor
+        cursor: cursor ? { id: cursor } : undefined,
+        skip: cursor ? 1 : 0,
+        orderBy: [
+          { createdAt: 'desc' }, // Stable cursor sorting strategy
+          { id: 'asc' },
+        ],
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          priority: true,
+          energyRequired: true,
+          isCompleted: true,
+          isTopPriority: true,
+          dueDate: true,
+          category: true,
+          tags: true,
+          createdAt: true,
+        },
+      }),
+    ]);
 
+    // 3. Process Next Cursor
     let nextCursor: string | undefined = undefined;
     if (tasks.length > limit) {
-      const nextItem = tasks.pop();
+      const nextItem = tasks.pop(); // Remove the extra item
       nextCursor = nextItem?.id;
     }
 
@@ -67,6 +83,7 @@ export class TasksService {
       success: true,
       data: tasks,
       meta: {
+        total, // Total count matching the filters
         nextCursor,
         hasNextPage: !!nextCursor,
       },
@@ -113,7 +130,7 @@ export class TasksService {
     });
   }
 
-  
+
   async update(userId: string, id: string, dto: UpdateTaskDto) {
     const task = await this.prisma.task.findFirst({
       where: { id, userId },
@@ -131,9 +148,9 @@ export class TasksService {
       },
     });
 
-    return{
-      success:true,
-      message:"Task updated successfully"
+    return {
+      success: true,
+      message: "Task updated successfully"
     }
 
   }
@@ -151,9 +168,9 @@ export class TasksService {
     await this.prisma.task.delete({
       where: { id: taskId },
     });
-    return{
-      success:true,
-      message:"Task deleted successfully"
+    return {
+      success: true,
+      message: "Task deleted successfully"
     }
   }
 }

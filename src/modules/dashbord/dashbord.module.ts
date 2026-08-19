@@ -7,5 +7,6 @@ import { DashbordController } from './dashbord.controller';
   imports: [HttpModule],
   controllers: [DashbordController],
   providers: [DashboardService],
+  exports:[DashboardService]
 })
 export class DashbordModule {}

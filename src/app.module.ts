@@ -26,6 +26,7 @@ import { HealthModule } from './modules/health/health.module';
 import { ScreenTimeModule } from './modules/screen-time/screen-time.module';
 import { GmailModule } from './modules/gmail/gmail.module';
 import { AiModule } from './modules/ai/ai.module';
+import { ActivityModule } from './modules/activity/activity.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { AiModule } from './modules/ai/ai.module';
     ScreenTimeModule,
     GmailModule,
     AiModule,
+    ActivityModule,
   ],
   controllers: [AppController],
   providers: [AppService],

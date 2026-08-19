@@ -42,6 +42,7 @@ enum TaskPriority {
 
 enum MoodLevel {
   LOW_ENERGY
+  DEPRESSED
   ANXIOUS
   BALANCED
   HIGH_ENERGY
@@ -83,6 +84,22 @@ enum DeviceOs {
   WEB
 }
 
+enum ActivityType {
+  WALKING
+  RUNNING
+  EXERCISING
+  WORKING
+  DEEP_WORK
+  MEETING
+  EATING
+  RESTING
+  COMMUTING
+  SOCIALIZING
+  CHORES
+  TIMEKILL
+  ENTERTAINMENT
+  OTHER
+}
 //////////////////////
 // USER MODEL
 //////////////////////
@@ -144,7 +161,6 @@ model User {
   verificationTokens            verificationToken[]
   notification                  Notification[]
   complain                      Complain[]
-  activity                      Activity[]
 
   // Productivity & Tracking Relations
   tasks                         Task[]
@@ -162,6 +178,7 @@ model User {
   memories                      MemoryVault[]
   aiBriefings                   AiBriefing[]
   userSkills                    Skill[]
+  activity                      ActivityLog[]
 
   @@map("users")
 }
@@ -169,7 +186,6 @@ model User {
 enum Gender {
   MALE
   FEMALE
-  OTHER
 }
 
 enum ActivityLevel {
@@ -228,13 +244,17 @@ model Complain {
   updatedAt DateTime       @updatedAt
 }
 
-model Activity {
-  id        String   @id @default(cuid())
-  userId    String
-  title     String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model ActivityLog {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        ActivityType @default(WORKING)
+  durationMin Int?         // Duration in minutes (e.g., 45)
+  note        String?      @db.Text
+  loggedAt    DateTime     @default(now())
+  createdAt   DateTime     @default(now())
+
+  @@map("activity_logs")
 }
 
 model Legals {
@@ -387,12 +407,17 @@ model SavingsGoal {
 
 // 6. HEALTH & WELLBEING
 model MoodLog {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mood      MoodLevel
-  note      String?
-  createdAt DateTime  @default(now())
+  id             String      @id @default(cuid())
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mood           MoodLevel  @default(BALANCED)
+  energyScore    Int?        // 1 to 5 scale
+  contextTags    String[]    // e.g. ["WORK", "MEETING", "CAFFEINE"]
+  symptoms       String[]    // e.g. ["HEADACHE", "EYE_STRAIN"]
+  note           String?     @db.Text
+  loggedAt       DateTime    @default(now()) // Essential for hourly mapping
+
+  createdAt      DateTime    @default(now())
 
   @@map("mood_logs")
 }
@@ -403,8 +428,6 @@ model HealthLog {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   sleepHours     Float?
   waterIntakeMl  Float?
-  weightKg       Float?
-  energyScore    Int?     // 1 to 10 scale
   date           DateTime @db.Date
 
   @@unique([userId, date])

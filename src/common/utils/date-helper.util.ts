@@ -14,3 +14,16 @@ export function getMonthRange(monthOffset: number = 0) {
     endDate: targetEndDate,
   };
 }
+
+  // Helper function to calculate age from Date of Birth
+  export function calculateAge(dateOfBirth: Date): number {
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  }
