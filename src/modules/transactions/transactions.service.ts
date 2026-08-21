@@ -93,4 +93,34 @@ export class TransactionsService {
       where: { id: transactionId },
     });
   }
+
+  async getTotalCash(userId: string) {
+    const grouped = await this.prisma.transaction.groupBy({
+      by: ['isExpense'],
+      where: { userId },
+      _sum: {
+        amount: true,
+      },
+    });
+
+    let totalIncome = 0;
+    let totalExpense = 0;
+
+    for (const group of grouped) {
+      const sum = group._sum.amount ? Number(group._sum.amount) : 0;
+      if (group.isExpense) {
+        totalExpense = sum;
+      } else {
+        totalIncome = sum;
+      }
+    }
+
+    const totalCash = totalIncome - totalExpense;
+
+    return {
+      totalIncome,
+      totalExpense,
+      totalCash,
+    };
+  }
 }

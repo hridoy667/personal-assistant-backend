@@ -388,7 +388,7 @@ model Budget {
   month     Int      // 1-12
   year      Int
   createdAt DateTime @default(now())
-
+  @@unique([userId, category, month, year])
   @@map("budgets")
 }
 

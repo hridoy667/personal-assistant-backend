@@ -16,21 +16,21 @@ export class HealthService {
 
   private readonly logger = new Logger(DashboardService.name);
 
-  async createMoodLog(userId: string, dto: CreateMoodLogDto) {
-  const loggedAt = dto.date ? new Date(dto.date) : new Date();
+//   async createMoodLog(userId: string, dto: CreateMoodLogDto) {
+//   const loggedAt = dto.date ? new Date(dto.date) : new Date();
 
-  return this.prisma.moodLog.create({
-    data: {
-      userId,
-      loggedAt,
-      ...(dto.mood !== undefined && { mood: dto.mood }),
-      ...(dto.energyScore !== undefined && { energyScore: dto.energyScore }),
-      ...(dto.contextTags !== undefined && { contextTags: dto.contextTags }),
-      ...(dto.symptoms !== undefined && { symptoms: dto.symptoms }),
-      ...(dto.note !== undefined && { note: dto.note }),
-    },
-  });
-}
+//   return this.prisma.moodLog.create({
+//     data: {
+//       userId,
+//       loggedAt,
+//       ...(dto.mood !== undefined && { mood: dto.mood }),
+//       ...(dto.energyScore !== undefined && { energyScore: dto.energyScore }),
+//       ...(dto.contextTags !== undefined && { contextTags: dto.contextTags }),
+//       ...(dto.symptoms !== undefined && { symptoms: dto.symptoms }),
+//       ...(dto.note !== undefined && { note: dto.note }),
+//     },
+//   });
+// }
 
   async getHealthHistory(userId: string, days = 30) {
     const startDate = new Date();

@@ -30,12 +30,12 @@ async function bootstrap() {
     }),
   );
 
-  // CORS configuration updated to explicitly handle custom headers and credentials
+  // CORS configuration (Allows Mobile Apps + Cloudflare Tunnels)
   app.enableCors({
-    origin: true, // Allows requests from mobile app (Metro/Expo, local IP, or emulators)
+    origin: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    allowedHeaders: '*', // Allows all headers passed by Cloudflare/Axios
   });
 
   // Serve Static Assets
@@ -43,23 +43,21 @@ async function bootstrap() {
     prefix: '/public',
   });
 
-  // Swagger setup
+  // Swagger setup mounted at /api/docs
   const options = new DocumentBuilder()
     .setTitle(`${process.env.APP_NAME || 'App'} API`)
     .setVersion('1.0')
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, options);
-  SwaggerModule.setup('api/docs', app, document, {
-    useGlobalPrefix: false,
-  });
+  SwaggerModule.setup('docs', app, document);
 
   app.useGlobalFilters(new AllExceptionsFilter());
 
   const port = process.env.PORT ?? 5000;
   
-  // Bind to '0.0.0.0' for local network availability
+  // Bind to '0.0.0.0' for local & tunnel availability
   await app.listen(port, '0.0.0.0');
-  console.log(`Server running on http://0.0.0.0:${port}/api`);
+  console.log(`Server running on http://localhost:${port}/api`);
 }
 bootstrap();

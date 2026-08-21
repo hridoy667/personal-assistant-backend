@@ -21,11 +21,11 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
-  @Post('log')
-  @ApiOperation({ summary: 'Upsert daily health log (sleep, water, weight, energy)' })
-  upsertLog(@Req() req: any, @Body() dto: CreateMoodLogDto) {
-    return this.healthService.createMoodLog(req.user.userId, dto);
-  }
+  // @Post('log')
+  // @ApiOperation({ summary: 'Upsert daily health log (sleep, water, weight, energy)' })
+  // upsertLog(@Req() req: any, @Body() dto: CreateMoodLogDto) {
+  //   return this.healthService.createMoodLog(req.user.userId, dto);
+  // }
 
   @Get('history')
   @ApiOperation({ summary: 'Get historical health metrics' })

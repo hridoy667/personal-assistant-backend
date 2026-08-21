@@ -30,8 +30,6 @@ export class FinancePlanningController {
     private readonly financePlanningService: FinancePlanningService,
   ) {}
 
-  // --- BUDGET ENDPOINTS ---
-
   @Post('budgets')
   @ApiOperation({ summary: 'Set monthly budget limit for a category' })
   createBudget(@Req() req: any, @Body() dto: CreateBudgetDto) {

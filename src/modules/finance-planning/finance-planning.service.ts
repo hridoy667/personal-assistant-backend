@@ -23,15 +23,42 @@ export class FinancePlanningService {
   }
 
   async getBudgets(userId: string, month: number, year: number) {
-    return this.prisma.budget.findMany({
-      where: {
-        userId,
-        month,
-        year,
-      },
-      orderBy: { category: 'asc' },
-    });
-  }
+  const budgets = await this.prisma.budget.findMany({
+    where: { userId, month, year },
+    orderBy: { category: 'asc' },
+  });
+
+  // মাসের শুরু ও শেষ তারিখ নির্ধারণ
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59);
+
+  // প্রতিটি বাজেটের জন্য খরচ হিসাব
+  const budgetsWithSpent = await Promise.all(
+    budgets.map(async (budget) => {
+      const spentAggregation = await this.prisma.transaction.aggregate({
+        where: {
+          userId,
+          category: { equals: budget.category, mode: 'insensitive' },
+          isExpense: true,
+          transactedAt: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+        _sum: { amount: true },
+      });
+
+      const spent = spentAggregation._sum.amount ? Number(spentAggregation._sum.amount) : 0;
+      return {
+        ...budget,
+        spent,
+        remaining: budget.limit - spent,
+      };
+    }),
+  );
+
+  return budgetsWithSpent;
+}
 
   async deleteBudget(userId: string, budgetId: string) {
     const budget = await this.prisma.budget.findFirst({
@@ -70,28 +97,40 @@ export class FinancePlanningService {
   }
 
   async depositToSavings(
-    userId: string,
-    goalId: string,
-    dto: DepositSavingsDto,
-  ) {
-    const goal = await this.prisma.savingsGoal.findFirst({
-      where: { id: goalId, userId },
-      select: { id: true },
-    });
+  userId: string,
+  goalId: string,
+  dto: DepositSavingsDto,
+) {
+  const goal = await this.prisma.savingsGoal.findFirst({
+    where: { id: goalId, userId },
+  });
 
-    if (!goal) {
-      throw new NotFoundException('Savings goal not found');
-    }
+  if (!goal) {
+    throw new NotFoundException('Savings goal not found');
+  }
 
-    return this.prisma.savingsGoal.update({
+  return this.prisma.$transaction(async (tx) => {
+    const updatedGoal = await tx.savingsGoal.update({
       where: { id: goalId },
       data: {
-        currentAmount: {
-          increment: dto.amount,
-        },
+        currentAmount: { increment: dto.amount },
       },
     });
-  }
+
+    await tx.transaction.create({
+      data: {
+        userId,
+        amount: dto.amount,
+        category: 'Savings',
+        isExpense: true,
+        description: `Deposit to savings goal: ${goal.title}`,
+        transactedAt: new Date(),
+      },
+    });
+
+    return updatedGoal;
+  });
+}
 
   async deleteSavingsGoal(userId: string, goalId: string) {
     const goal = await this.prisma.savingsGoal.findFirst({

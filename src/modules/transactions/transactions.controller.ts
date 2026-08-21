@@ -36,6 +36,12 @@ export class TransactionsController {
     return this.transactionsService.findAll(req.user.userId, pagination);
   }
 
+  @Get('total-cash')
+  @ApiOperation({ summary: 'Get total cash balance (income minus expenses)' })
+  getTotalCash(@Req() req: any) {
+    return this.transactionsService.getTotalCash(req.user.userId);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Update amount, category, type, or note of a transaction' })
   update(
