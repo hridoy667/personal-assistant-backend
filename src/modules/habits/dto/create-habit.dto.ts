@@ -1,6 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsEnum, IsNumber, Min } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsNumber, Min, IsArray } from 'class-validator';
 import { HabitType } from '@prisma/client';
+
+export enum WeekDay {
+  DAILY = 'DAILY',
+  SUNDAY = 'SUNDAY',
+  MONDAY = 'MONDAY',
+  TUESDAY = 'TUESDAY',
+  WEDNESDAY = 'WEDNESDAY',
+  THURSDAY = 'THURSDAY',
+  FRIDAY = 'FRIDAY',
+  SATURDAY = 'SATURDAY',
+}
 
 export class CreateHabitDto {
   @ApiProperty({ example: 'Read Quran / Books' })
@@ -22,12 +33,12 @@ export class CreateHabitDto {
   @IsOptional()
   @IsString()
   unit?: string;
-}
 
-export class LogHabitDto {
-  @ApiPropertyOptional({ example: 1 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0.1)
-  value?: number;
+  @ApiProperty({
+    example: ['DAILY'],
+    description: "['DAILY'] or array like ['MONDAY', 'FRIDAY']",
+  })
+  @IsArray()
+  @IsString({ each: true })
+  frequency!: string[];
 }

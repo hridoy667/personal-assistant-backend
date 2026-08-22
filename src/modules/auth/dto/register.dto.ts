@@ -10,6 +10,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Min,
 } from 'class-validator';
 
@@ -23,6 +24,32 @@ export enum ActivityLevel {
   LIGHTLY_ACTIVE = 'LIGHTLY_ACTIVE',
   MODERATELY_ACTIVE = 'MODERATELY_ACTIVE',
   VERY_ACTIVE = 'VERY_ACTIVE',
+}
+
+export enum PersonalityType {
+  // Analysts
+  INTJ_ARCHITECT = 'INTJ_ARCHITECT',
+  INTP_LOGICIAN = 'INTP_LOGICIAN',
+  ENTJ_COMMANDER = 'ENTJ_COMMANDER',
+  ENTP_DEBATER = 'ENTP_DEBATER',
+
+  // Diplomats
+  INFJ_ADVOCATE = 'INFJ_ADVOCATE',
+  INFP_MEDIATOR = 'INFP_MEDIATOR',
+  ENFJ_PROTAGONIST = 'ENFJ_PROTAGONIST',
+  ENFP_CAMPAIGNER = 'ENFP_CAMPAIGNER',
+
+  // Sentinels
+  ISTJ_LOGISTICIAN = 'ISTJ_LOGISTICIAN',
+  ISFJ_DEFENDER = 'ISFJ_DEFENDER',
+  ESTJ_EXECUTIVE = 'ESTJ_EXECUTIVE',
+  ESFJ_CONSUL = 'ESFJ_CONSUL',
+
+  // Explorers
+  ISTP_VIRTUSOA = 'ISTP_VIRTUSOA',
+  ISFP_ADVENTURER = 'ISFP_ADVENTURER',
+  ESTP_ENTREPRENEUR = 'ESTP_ENTREPRENEUR',
+  ESFP_ENTERTAINER = 'ESFP_ENTERTAINER',
 }
 
 export class RegisterDto {
@@ -67,6 +94,30 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   upazila?: string;
+
+  // --- Routine & Personality ---
+
+  @ApiPropertyOptional({ example: '06:00', default: '06:00', description: 'HH:mm format' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'defaultWakeTime must be in HH:mm format (e.g. 06:00)',
+  })
+  defaultWakeTime?: string = '06:00';
+
+  @ApiPropertyOptional({ example: '23:00', default: '23:00', description: 'HH:mm format' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'defaultSleepTime must be in HH:mm format (e.g. 23:00)',
+  })
+  defaultSleepTime?: string = '23:00';
+
+  @ApiPropertyOptional({ enum: PersonalityType, example: PersonalityType.INTJ_ARCHITECT })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'null' || value === '' ? undefined : value))
+  @IsEnum(PersonalityType)
+  personalityType?: PersonalityType;
 
   // --- Physical Health Metrics ---
 

@@ -59,13 +59,6 @@ enum HabitType {
   QUANTITATIVE
 }
 
-enum RoutineType {
-  MORNING
-  AFTERNOON
-  EVENING
-  CUSTOM
-}
-
 enum AppCategory {
   PRODUCTIVE
   NEUTRAL
@@ -100,6 +93,33 @@ enum ActivityType {
   ENTERTAINMENT
   OTHER
 }
+
+enum PersonalityType {
+  // Analysts
+  INTJ_ARCHITECT
+  INTP_LOGICIAN
+  ENTJ_COMMANDER
+  ENTP_DEBATER
+
+  // Diplomats
+  INFJ_ADVOCATE
+  INFP_MEDIATOR
+  ENFJ_PROTAGONIST
+  ENFP_CAMPAIGNER
+
+  // Sentinels
+  ISTJ_LOGISTICIAN
+  ISFJ_DEFENDER
+  ESTJ_EXECUTIVE
+  ESFJ_CONSUL
+
+  // Explorers
+  ISTP_VIRTUSO
+  ISFP_ADVENTURER
+  ESTP_ENTREPRENEUR
+  ESFP_ENTERTAINER
+}
+
 //////////////////////
 // USER MODEL
 //////////////////////
@@ -115,7 +135,7 @@ model User {
   bio                           String?
   dateOfBirth                   DateTime?
   gender                        Gender?
-
+  personalityType               PersonalityType?
   // Location & Timezone (Automated)
   timezone                      String     @default("Asia/Dhaka")
   district                      String?
@@ -126,6 +146,9 @@ model User {
   // Physical Health & Metrics
   height                        Float?     // in meters
   weight                        Float?     // in kg
+  defaultWakeTime         String    @default("06:00") // HH:mm format
+  defaultSleepTime        String    @default("23:00") // HH:mm format
+
   activityLevel                 ActivityLevel? @default(SEDENTARY)
 
   // Modular Feature Preferences (Optional Modules)
@@ -165,7 +188,6 @@ model User {
   // Productivity & Tracking Relations
   tasks                         Task[]
   habits                        Habit[]
-  routines                      Routine[]
   moodLogs                      MoodLog[]
   transactions                  Transaction[]
   budgets                       Budget[]
@@ -179,7 +201,7 @@ model User {
   aiBriefings                   AiBriefing[]
   userSkills                    Skill[]
   activity                      ActivityLog[]
-
+  sleepLogs               SleepLog[]
   @@map("users")
 }
 
@@ -289,9 +311,13 @@ model Task {
   isCompleted      Boolean            @default(false)
   completedAt      DateTime?
   recurrenceRule   String?            // e.g. "FREQ=DAILY", "REL=FAJR_AFTER"
-  category         String?
+  category         String?            @default("HABIT")
   tags             String[]
   
+  // Link task back to its parent habit
+  habitId          String?
+  habit            Habit?             @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
   // Relations
   parentId         String?
   parentTask       Task?              @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
@@ -305,19 +331,22 @@ model Task {
   @@map("tasks")
 }
 
-// 1. HABITS & SKILLS
 model Habit {
   id             String      @id @default(cuid())
   userId         String
   user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   title          String
   type           HabitType   @default(BINARY)
-  targetValue    Float       @default(1) // e.g. 1 time, or 2500 ml
-  unit           String?     // e.g. "ml", "pages", "mins"
+  targetValue    Float       @default(1)
+  unit           String?     
   currentStreak  Int         @default(0)
   longestStreak  Int         @default(0)
-  streakSavers   Int         @default(1) // Monthly protection count
-  logs           HabitLog[]
+  streakSavers   Int         @default(1)
+
+  // Days selected: ["DAILY"] or ["MONDAY", "TUESDAY", "FRIDAY"]
+  frequency      String[]    @default(["DAILY"])
+
+  tasks          Task[]
 
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -325,43 +354,55 @@ model Habit {
   @@map("habits")
 }
 
-model HabitLog {
-  id        String   @id @default(cuid())
-  habitId   String
-  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
-  value     Float    @default(1)
-  loggedAt  DateTime @default(now())
+model SleepLog {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("habit_logs")
+  sleptAt        DateTime  // Timestamp when user pressed "Going to Sleep"
+  wokeUpAt       DateTime? // Timestamp when user pressed "I'm Awake" (null while sleeping)
+  isFallback     Boolean   @default(false) // True if auto-filled due to missing input
+  qualityRating  Int?      // 1 to 5 optional rating upon waking up
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, sleptAt])
+  @@map("sleep_logs")
 }
 
 model Skill {
-  id             String   @id @default(cuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title          String   // e.g. "Master React Native"
-  targetHours    Float
-  loggedHours    Float    @default(0)
-  level          String?  // e.g. "Beginner", "Intermediate"
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id          String        @id @default(cuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String        // e.g. "Master React Native Reanimated"
+  targetHours Float
+  loggedHours Float         @default(0)
+  level       String?       // e.g. "Intermediate"
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  modules     SkillModule[]
 
   @@map("skills")
 }
 
-// 3. ROUTINES
-model Routine {
-  id        String      @id @default(cuid())
-  userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String
-  type      RoutineType @default(MORNING)
-  steps     Json        // Sequence of steps with duration and triggers
-  isActive  Boolean     @default(true)
-  createdAt DateTime    @default(now())
+model SkillModule {
+  id               String   @id @default(cuid())
+  skillId          String
+  skill            Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  title            String   // e.g. "Module 1: Interpolation Basics"
+  order            Int      @default(0)
+  theoryText       String   @db.Text // Bulleted core concepts / rules
+  videoUrl         String?  // e.g. "https://www.youtube.com/watch?v=xxx&t=320s"
+  practiceTask     String   @db.Text // Hands-on challenge to build
+  isCompleted      Boolean  @default(false)
+  
+  createdAt        DateTime @default(now())
 
-  @@map("routines")
+  @@map("skill_modules")
 }
+
 
 // 5. FINANCE MANAGEMENT
 model Transaction {
@@ -379,18 +420,6 @@ model Transaction {
   @@map("transactions")
 }
 
-model Budget {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category  String
-  limit     Float
-  month     Int      // 1-12
-  year      Int
-  createdAt DateTime @default(now())
-  @@unique([userId, category, month, year])
-  @@map("budgets")
-}
 
 model SavingsGoal {
   id            String   @id @default(cuid())
@@ -421,6 +450,21 @@ model MoodLog {
 
   @@map("mood_logs")
 }
+
+
+model Budget {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  String
+  limit     Float
+  month     Int      // 1-12
+  year      Int
+  createdAt DateTime @default(now())
+  @@unique([userId, category, month, year])
+  @@map("budgets")
+}
+
 
 model HealthLog {
   id             String   @id @default(cuid())

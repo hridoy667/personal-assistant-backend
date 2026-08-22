@@ -8,6 +8,7 @@ import {
   Req,
   ParseIntPipe,
   ParseFloatPipe,
+  Param,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { HealthService } from './health.service';
@@ -20,12 +21,6 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 @Controller('health')
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
-
-  // @Post('log')
-  // @ApiOperation({ summary: 'Upsert daily health log (sleep, water, weight, energy)' })
-  // upsertLog(@Req() req: any, @Body() dto: CreateMoodLogDto) {
-  //   return this.healthService.createMoodLog(req.user.userId, dto);
-  // }
 
   @Get('history')
   @ApiOperation({ summary: 'Get historical health metrics' })
@@ -44,5 +39,32 @@ export class HealthController {
   ) {
     const userId = req.user.userId;
     return this.healthService.getWellbeingContext(userId, latitude, longitude);
+  }
+
+  @Get('active')
+@ApiOperation({ summary: 'Get current active sleep session' })
+async getActiveSession(@Req() req: any) {
+  const session = await this.healthService.getActiveSleepSession(req.user.userId);
+  
+  return session ?? null; 
+}
+
+  @Post('start')
+  @ApiOperation({ summary: 'Start a new sleep session' })
+  async startSleep(
+    @Req() req: any,
+    @Body() body: { sleptAt?: string },
+  ) {
+    return this.healthService.startSleepSession(req.user.userId, body.sleptAt);
+  }
+
+  @Post(':id/wake')
+  @ApiOperation({ summary: 'Log wake time for an active sleep session' })
+  async wakeUp(
+    @Req() req: any,
+    @Param('id') sessionId: string,
+    @Body() body: { wokeUpAt?: string },
+  ) {
+    return this.healthService.wakeUpSession(req.user.userId, sessionId, body.wokeUpAt);
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMoodLogDto } from './dto/health-log.dto';
 import { calculateAge } from 'src/common/utils/date-helper.util';
@@ -6,6 +6,7 @@ import { calculateBMR, calculateDynamicHydration, calculateTDEE, getOutdoorAdvis
 import { DashboardService } from '../dashbord/dashboard.service';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
+import { startOfDay, endOfDay, setHours, setMinutes, parse, subDays, addDays } from 'date-fns';
 
 @Injectable()
 export class HealthService {
@@ -16,21 +17,6 @@ export class HealthService {
 
   private readonly logger = new Logger(DashboardService.name);
 
-//   async createMoodLog(userId: string, dto: CreateMoodLogDto) {
-//   const loggedAt = dto.date ? new Date(dto.date) : new Date();
-
-//   return this.prisma.moodLog.create({
-//     data: {
-//       userId,
-//       loggedAt,
-//       ...(dto.mood !== undefined && { mood: dto.mood }),
-//       ...(dto.energyScore !== undefined && { energyScore: dto.energyScore }),
-//       ...(dto.contextTags !== undefined && { contextTags: dto.contextTags }),
-//       ...(dto.symptoms !== undefined && { symptoms: dto.symptoms }),
-//       ...(dto.note !== undefined && { note: dto.note }),
-//     },
-//   });
-// }
 
   async getHealthHistory(userId: string, days = 30) {
     const startDate = new Date();
@@ -173,6 +159,94 @@ export class HealthService {
       ...wellbeingPayload,
       cached: false,
     };
+  }
+
+  async getActiveSleepSession(userId: string) {
+    return this.prisma.sleepLog.findFirst({
+      where: {
+        userId,
+        wokeUpAt: null,
+      },
+      orderBy: {
+        sleptAt: 'desc',
+      },
+    });
+  }
+
+  /**
+   * Start a new sleep session ("Going to Sleep")
+   */
+  async startSleepSession(userId: string, sleptAt?: string) {
+    // Close any previous abandoned sessions to ensure clean state
+    await this.prisma.sleepLog.updateMany({
+      where: {
+        userId,
+        wokeUpAt: null,
+      },
+      data: {
+        wokeUpAt: new Date(),
+        isFallback: true,
+      },
+    });
+
+    return this.prisma.sleepLog.create({
+      data: {
+        userId,
+        sleptAt: sleptAt ? new Date(sleptAt) : new Date(),
+      },
+    });
+  }
+
+  /**
+   * End an ongoing sleep session ("I'm Awake")
+   */
+  async wakeUpSession(userId: string, sessionId: string, wokeUpAt?: string) {
+    const existingSession = await this.prisma.sleepLog.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!existingSession || existingSession.userId !== userId) {
+      throw new NotFoundException('Active sleep session not found');
+    }
+
+    return this.prisma.sleepLog.update({
+      where: { id: sessionId },
+      data: {
+        wokeUpAt: wokeUpAt ? new Date(wokeUpAt) : new Date(),
+      },
+    });
+  }
+
+  /**
+   * Cron Job Helper: Auto-close abandoned sleep sessions older than 18 hours
+   */
+  async handleMissedSleepLogs() {
+    const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000);
+
+    const abandonedLogs = await this.prisma.sleepLog.findMany({
+      where: {
+        wokeUpAt: null,
+        sleptAt: { lte: eighteenHoursAgo },
+      },
+      include: { user: true },
+    });
+
+    for (const log of abandonedLogs) {
+      const defaultWake = log.user?.defaultWakeTime || '06:00';
+      const [wakeH, wakeM] = defaultWake.split(':').map(Number);
+      const estimatedWake = setMinutes(
+        setHours(addDays(log.sleptAt, 1), wakeH),
+        wakeM,
+      );
+
+      await this.prisma.sleepLog.update({
+        where: { id: log.id },
+        data: {
+          wokeUpAt: estimatedWake,
+          isFallback: true,
+        },
+      });
+    }
   }
 
 }

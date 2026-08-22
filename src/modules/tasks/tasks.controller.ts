@@ -38,13 +38,10 @@ export class TasksController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get single task for logged-in user' })
-  async getOne(
-    @Req() req: any, 
-    @Param('id') id: string,
-  ) {
-    const userId = req.user.userId;
-    return await this.tasksService.getOne(userId, id);
+  getOne(@Req() req: any, @Param('id') id: string) {
+    return this.tasksService.getOne(req.user.userId, id);
   }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Update details of a task' })
   update(

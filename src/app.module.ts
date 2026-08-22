@@ -20,7 +20,6 @@ import { MoodModule } from './modules/mood/mood.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { JournalModule } from './modules/journal/journal.module';
-import { RoutinesModule } from './modules/routines/routines.module';
 import { FinancePlanningModule } from './modules/finance-planning/finance-planning.module';
 import { HealthModule } from './modules/health/health.module';
 import { ScreenTimeModule } from './modules/screen-time/screen-time.module';
@@ -83,7 +82,6 @@ import { ActivityModule } from './modules/activity/activity.module';
     TransactionsModule,
     SkillsModule,
     JournalModule,
-    RoutinesModule,
     FinancePlanningModule,
     HealthModule,
     ScreenTimeModule,
