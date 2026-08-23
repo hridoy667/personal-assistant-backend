@@ -94,6 +94,11 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   upazila?: string;
+  
+  @ApiPropertyOptional({ example: 'Dhanmondi' })
+  @IsOptional()
+  @IsString()
+  location?: string;
 
   // --- Routine & Personality ---
 

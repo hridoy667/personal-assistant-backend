@@ -142,7 +142,7 @@ model User {
   upazila                       String?
   latitude                      Float?
   longitude                     Float?
-
+  location                      String?
   // Physical Health & Metrics
   height                        Float?     // in meters
   weight                        Float?     // in kg
@@ -531,7 +531,6 @@ model JournalEntry {
   title     String?
   content   String?   @db.Text
   audioUrl  String?
-  mood      MoodLevel?
   createdAt DateTime @default(now())
 
   @@map("journal_entries")

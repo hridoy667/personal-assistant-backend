@@ -39,7 +39,6 @@ export class JournalService {
         title: true,
         content: true,
         audioUrl: true,
-        mood: true,
         createdAt: true,
       },
     });

@@ -80,7 +80,7 @@ export class DashboardService {
     // 1. Fetch User from DB
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { name: true, district: true },
+      select: { name: true, location: true },
     });
 
     let targetLat = latitude;
@@ -94,14 +94,13 @@ export class DashboardService {
       const roundedLat = targetLat.toFixed(2);
       const roundedLon = targetLon.toFixed(2);
       redisKey = `weather:coords:${roundedLat}:${roundedLon}`;
-    } else if (user?.district) {
-      const districtClean = user.district.trim();
+    } else if (user?.location) {
+      const districtClean = user.location.trim();
       redisKey = `weather:district:${districtClean.toLowerCase()}`;
     } else {
       throw new BadRequestException({
         success: false,
         requiresLocationAccess: true,
-        message: 'No district set. Please enable device location access.',
       });
     }
 
@@ -128,14 +127,14 @@ export class DashboardService {
     try {
       if (targetLat === undefined || targetLon === undefined) {
         const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(
-          user!.district!.trim(),
+          user!.location!.trim(),
         )}&limit=1&appid=${apiKey}`;
 
         const geoResponse = await firstValueFrom(this.httpService.get(geoUrl));
         const locations = geoResponse.data ?? [];
 
         if (locations.length === 0) {
-          throw new NotFoundException(`Location '${user!.district}' could not be resolved.`);
+          throw new NotFoundException(`Location '${user!.location}' could not be resolved.`);
         }
 
         targetLat = locations[0].lat;
@@ -162,6 +161,19 @@ export class DashboardService {
       const finalLocation = locationName
         ? `${locationName}, ${countryCode}`
         : `${weather.name}, ${weather.sys?.country}`;
+
+      // --- Persist Location to User Profile ---
+      // If user's location is not set or changed, update Prisma asynchronously
+      if (userId && user?.location !== finalLocation) {
+        this.prisma.user
+          .update({
+            where: { id: userId },
+            data: { location: finalLocation },
+          })
+          .catch((dbError) => {
+            this.logger.error('Failed to auto-update user location:', dbError);
+          });
+      }
 
       // Daylight progress
       const sunrise = weather.sys?.sunrise;
@@ -243,94 +255,94 @@ export class DashboardService {
   }
 
   async getQuranAyat(userId: string) {
-  const redisKey = `quran:random_ayat`; // Shared cache key
-  const CACHE_TTL_SECONDS = 5400; // 1.5 hours
+    const redisKey = `quran:random_ayat`; // Shared cache key
+    const CACHE_TTL_SECONDS = 5400; // 1.5 hours
 
-  const user = await this.prisma.user.findFirst({
-    where: { id: userId },
-    select: {
-      name: true,
-      enableIslamicFeatures: true,
-    },
-  });
-
-  // 1. Check if user exists and explicitly has Islamic features enabled
-  if (!user || user.enableIslamicFeatures !== true) {
-    return {
-      success: false,
-      message: 'Islamic feature not enabled',
-    };
-  }
-
-  // 2. Check Redis Cache
-  try {
-    const cachedAyat = await this.redis.get(redisKey);
-    if (cachedAyat) {
-      return {
-        ...JSON.parse(cachedAyat),
-        userName: user.name ?? 'User',
-        cached: true,
-      };
-    }
-  } catch (redisError) {
-    this.logger.error('Redis read error:', redisError);
-  }
-
-  // 3. Fetch from External API
-  const apiKey = process.env.QURAN_AYAT_API;
-  try {
-    const response = await fetch('https://ummahapi.com/api/quran/random', {
-      headers: {
-        Accept: 'application/json',
-        ...(apiKey ? { 'x-api-key': apiKey } : {}),
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId },
+      select: {
+        name: true,
+        enableIslamicFeatures: true,
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch Quran verse: ${response.statusText}`);
+    // 1. Check if user exists and explicitly has Islamic features enabled
+    if (!user || user.enableIslamicFeatures !== true) {
+      return {
+        success: false,
+        message: 'Islamic feature not enabled',
+      };
     }
 
-    const result = await response.json();
-
-    if (!result.success) {
-      throw new Error('API returned an unsuccessful status.');
-    }
-
-    const { surah, verse, audio } = result.data;
-
-    const ayatPayload = {
-      success: true,
-      surahName: surah.name_english,
-      surahArabic: surah.name_arabic,
-      verseKey: verse.verse_key,
-      arabic: verse.arabic,
-      translation: verse.translations.sahih_international,
-      bengaliTranslation: verse.translations.bengali,
-      audioUrl: audio?.[0]?.ayah_audio || null,
-    };
-
-    // 4. Save to Redis Cache with 1.5-Hour Expiry
+    // 2. Check Redis Cache
     try {
-      await this.redis.set(
-        redisKey,
-        JSON.stringify(ayatPayload),
-        'EX',
-        CACHE_TTL_SECONDS,
-      );
+      const cachedAyat = await this.redis.get(redisKey);
+      if (cachedAyat) {
+        return {
+          ...JSON.parse(cachedAyat),
+          userName: user.name ?? 'User',
+          cached: true,
+        };
+      }
     } catch (redisError) {
-      this.logger.error('Redis write error:', redisError);
+      this.logger.error('Redis read error:', redisError);
     }
 
-    return {
-      ...ayatPayload,
-      userName: user.name ?? 'User',
-      cached: false,
-    };
-  } catch (error: any) {
-    this.logger.error('Error fetching Quran Ayat:', error.message);
-    throw error;
+    // 3. Fetch from External API
+    const apiKey = process.env.QURAN_AYAT_API;
+    try {
+      const response = await fetch('https://ummahapi.com/api/quran/random', {
+        headers: {
+          Accept: 'application/json',
+          ...(apiKey ? { 'x-api-key': apiKey } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Quran verse: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error('API returned an unsuccessful status.');
+      }
+
+      const { surah, verse, audio } = result.data;
+
+      const ayatPayload = {
+        success: true,
+        surahName: surah.name_english,
+        surahArabic: surah.name_arabic,
+        verseKey: verse.verse_key,
+        arabic: verse.arabic,
+        translation: verse.translations.sahih_international,
+        bengaliTranslation: verse.translations.bengali,
+        audioUrl: audio?.[0]?.ayah_audio || null,
+      };
+
+      // 4. Save to Redis Cache with 1.5-Hour Expiry
+      try {
+        await this.redis.set(
+          redisKey,
+          JSON.stringify(ayatPayload),
+          'EX',
+          CACHE_TTL_SECONDS,
+        );
+      } catch (redisError) {
+        this.logger.error('Redis write error:', redisError);
+      }
+
+      return {
+        ...ayatPayload,
+        userName: user.name ?? 'User',
+        cached: false,
+      };
+    } catch (error: any) {
+      this.logger.error('Error fetching Quran Ayat:', error.message);
+      throw error;
+    }
   }
-}
 
   private async getAdminDashboard() {
 
