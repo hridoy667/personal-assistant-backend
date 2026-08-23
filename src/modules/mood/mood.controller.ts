@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, UseGuards, Req, Param, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, Req, Param, Patch,Headers as NestHeaders } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { MoodService } from './mood.service';
 import { CreateMoodLogDto } from './dto/create-mood.dto';
@@ -19,9 +19,12 @@ export class MoodController {
   }
 
   @Get('today')
-  @ApiOperation({ summary: 'Get all mood entries logged today' })
-  getDailyLogs(@Req() req: any) {
-    return this.moodService.getDailyLogs(req.user.userId);
+  @ApiOperation({ summary: "Get all mood entries logged in today's logical day bounds" })
+  getDailyLogs(
+    @Req() req: any,
+    @NestHeaders('x-timezone') userTimeZone: string,
+  ) {
+    return this.moodService.getDailyLogs(req.user.userId, userTimeZone);
   }
 
   @Patch(':id')

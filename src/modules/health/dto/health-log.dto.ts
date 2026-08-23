@@ -1,75 +1,66 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsNumber,
-  IsInt,
-  IsOptional,
-  IsDateString,
-  IsEnum,
-  IsArray,
-  IsString,
-  Min,
-  Max,
-} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsDateString, IsOptional, IsInt, Min, Max, IsEnum, IsNotEmpty } from 'class-validator';
 
-export enum MoodLevel {
-  LOW_ENERGY = 'LOW_ENERGY',
-  DEPRESSED = 'DEPRESSED',
-  ANXIOUS = 'ANXIOUS',
-  BALANCED = 'BALANCED',
-  HIGH_ENERGY = 'HIGH_ENERGY',
+export enum StatsTimeframe {
+  DAY = 'DAY',
+  WEEK = 'WEEK',
+  MONTH = 'MONTH',
+  YEAR = 'YEAR',
 }
 
-export class CreateMoodLogDto {
-  @ApiPropertyOptional({ example: '2026-08-19T22:37:42Z', description: 'Log date or full ISO string' })
+export class StartSleepDto {
+  @ApiPropertyOptional({ example: '2026-08-19T22:37:42Z' })
   @IsOptional()
   @IsDateString()
-  date?: string;
+  sleptAt?: string;
+}
 
-  @ApiPropertyOptional({ example: 7.5, description: 'Hours of sleep' })
+export class WakeUpDto {
+  @ApiPropertyOptional({ example: '2026-08-20T06:37:42Z' })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(24)
-  sleepHours?: number;
+  @IsDateString()
+  wokeUpAt?: string;
 
-  @ApiPropertyOptional({ example: 2500, description: 'Water intake in ml' })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  waterIntakeMl?: number;
-
-  @ApiPropertyOptional({ example: 72.5, description: 'Weight in kg' })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  weightKg?: number;
-
-  @ApiPropertyOptional({ enum: MoodLevel, example: MoodLevel.BALANCED })
-  @IsOptional()
-  @IsEnum(MoodLevel)
-  mood?: MoodLevel;
-
-  @ApiPropertyOptional({ example: 4, description: 'Energy level from 1 to 5' })
+  @ApiPropertyOptional({ example: 4, description: 'Rating 1 to 5' })
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(5)
-  energyScore?: number;
+  qualityRating?: number;
+}
 
-  @ApiPropertyOptional({ example: ['WORK', 'MEETING', 'CAFFEINE'], type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  contextTags?: string[];
+export class UpsertSleepLogDto {
+  @ApiProperty({ example: '2026-08-15', description: 'The logical day to update' })
+  @IsNotEmpty()
+  @IsDateString()
+  targetDate!: string;
 
-  @ApiPropertyOptional({ example: ['HEADACHE', 'EYE_STRAIN'], type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  symptoms?: string[];
+  @ApiProperty({ example: '2026-08-15T23:30:00Z' })
+  @IsNotEmpty()
+  @IsDateString()
+  sleptAt!: string;
 
-  @ApiPropertyOptional({ example: 'Felt tired after mid-day meeting', description: 'Optional personal note' })
+  @ApiProperty({ example: '2026-08-16T07:00:00Z' })
+  @IsNotEmpty()
+  @IsDateString()
+  wokeUpAt!: string;
+
+  @ApiPropertyOptional({ example: 4 })
   @IsOptional()
-  @IsString()
-  note?: string;
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  qualityRating?: number;
+}
+
+export class SleepStatsQueryDto {
+  @ApiPropertyOptional({ enum: StatsTimeframe, default: StatsTimeframe.WEEK })
+  @IsOptional()
+  @IsEnum(StatsTimeframe)
+  timeframe?: StatsTimeframe = StatsTimeframe.WEEK;
+
+  @ApiPropertyOptional({ description: 'Target anchor date (defaults to today)', example: '2026-08-23' })
+  @IsOptional()
+  @IsDateString()
+  date?: string;
 }

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMoodLogDto } from './dto/create-mood.dto';
 import { UpdateMoodDto } from './dto/update-mood.dto';
+import { getUserDayBounds } from 'src/common/utils/day-bounds.util';
 
 @Injectable()
 export class MoodService {
@@ -16,15 +17,21 @@ export class MoodService {
     });
   }
 
-  async getDailyLogs(userId: string) {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+  async getDailyLogs(userId: string, userTimeZone?: string) {
+    // 1. Fetch user's logical day boundaries
+    const { dayStart, dayEnd } = await getUserDayBounds(
+      userId,
+      new Date(),
+      userTimeZone,
+    );
 
+    // 2. Query mood logs strictly within their active waking cycle
     return this.prisma.moodLog.findMany({
       where: {
         userId,
         createdAt: {
-          gte: startOfDay,
+          gte: dayStart,
+          lte: dayEnd,
         },
       },
       orderBy: { createdAt: 'asc' },
