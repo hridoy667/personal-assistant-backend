@@ -549,174 +549,194 @@ export class AuthService {
   }
 
   async updateProfile(userId: string, dto: any, file?: Express.Multer.File) {
-    const result = await this.prisma.$transaction(async (tx) => {
-      const currentUser = await tx.user.findUnique({
-        where: { id: userId },
-      });
-
-      if (!currentUser) {
-        throw new UnauthorizedException('You have to login or user not found');
-      }
-
-      const {
-        image,
-        dateOfBirth,
-        upazila,
-        district,
-        height,
-        weight,
-        personalityType,
-        defaultWakeTime,
-        defaultSleepTime,
-        enableIslamicFeatures,
-        enableMailAssistance,
-        enableFinanceTracker,
-        enableHealthTracking,
-        enableScreenTimeTracking,
-        enableAiBriefings,
-        ...restOfDto
-      } = dto;
-
-      const updateData: any = { ...restOfDto };
-
-      // Strip sensitive/unmodifiable fields
-      const sensitiveFields = [
-        'phone',
-        'type',
-        'status',
-        'isVerified',
-        'password',
-        'firebaseToken',
-        'latitude',
-        'longitude',
-      ];
-      sensitiveFields.forEach((field) => {
-        delete updateData[field];
-      });
-
-      // Handle string inputs from multipart/form-data
-      if (upazila && upazila.trim() !== '') updateData.upazila = upazila.trim();
-      if (district && district.trim() !== '') updateData.district = district.trim();
-
-      // Routine & Personality fixes
-      if (defaultWakeTime && defaultWakeTime.trim() !== '') {
-        updateData.defaultWakeTime = defaultWakeTime.trim();
-      }
-      if (defaultSleepTime && defaultSleepTime.trim() !== '') {
-        updateData.defaultSleepTime = defaultSleepTime.trim();
-      }
-      if (personalityType && personalityType !== 'null' && personalityType !== '') {
-        updateData.personalityType = personalityType;
-      } else if (personalityType === null || personalityType === 'null') {
-        updateData.personalityType = null;
-      }
-
-      // Physical metrics number parsing
-      if (height !== undefined && height !== null && height !== '') {
-        const parsedHeight = parseFloat(height);
-        if (!isNaN(parsedHeight)) updateData.height = parsedHeight;
-      }
-      if (weight !== undefined && weight !== null && weight !== '') {
-        const parsedWeight = parseFloat(weight);
-        if (!isNaN(parsedWeight)) updateData.weight = parsedWeight;
-      }
-
-      // Boolean feature flag conversions for form-data strings
-      const parseBool = (val: any) => val === true || val === 'true';
-      if (enableIslamicFeatures !== undefined) updateData.enableIslamicFeatures = parseBool(enableIslamicFeatures);
-      if (enableMailAssistance !== undefined) updateData.enableMailAssistance = parseBool(enableMailAssistance);
-      if (enableFinanceTracker !== undefined) updateData.enableFinanceTracker = parseBool(enableFinanceTracker);
-      if (enableHealthTracking !== undefined) updateData.enableHealthTracking = parseBool(enableHealthTracking);
-      if (enableScreenTimeTracking !== undefined) updateData.enableScreenTimeTracking = parseBool(enableScreenTimeTracking);
-      if (enableAiBriefings !== undefined) updateData.enableAiBriefings = parseBool(enableAiBriefings);
-
-      // Date of birth handling
-      if (dateOfBirth && String(dateOfBirth).trim() !== '') {
-        updateData.dateOfBirth = new Date(dateOfBirth);
-      }
-
-      // File avatar handling
-      if (file) {
-        try {
-          if (currentUser.avatarUrl) {
-            const oldFilename =
-              currentUser.avatarUrl.split('/avatars/')[1] ||
-              currentUser.avatarUrl.split('avatars-dir-token/')[1] ||
-              currentUser.avatarUrl;
-            if (oldFilename) {
-              const oldFilePath = path.join(
-                __dirname,
-                '..',
-                '..',
-                '..',
-                '..',
-                '..',
-                'public',
-                'avatars',
-                oldFilename,
-              );
-              if (fs.existsSync(oldFilePath)) {
-                fs.unlinkSync(oldFilePath);
-                console.log(`Old avatar storage unlinked: ${oldFilename}`);
-              }
-            }
-          }
-
-          const savedFileName = await processAndSaveImage(file, 'avatars');
-          updateData.avatarUrl = savedFileName;
-        } catch (imageError) {
-          console.error('Failed to process incoming update avatar file payload:', imageError);
-        }
-      }
-
-      await tx.user.update({
-        where: { id: userId },
-        data: updateData,
-      });
-
-      // Return current and updated user location to determine cache key deletion
-      return {
-        oldLocation: currentUser.location,
-        newLocation: updateData.location,
-      };
+  const result = await this.prisma.$transaction(async (tx) => {
+    const currentUser = await tx.user.findUnique({
+      where: { id: userId },
     });
 
-    // 1. Clear Profile Cache
-    const cacheKey = `user:profile:${userId}`;
-    try {
-      await this.redis.del(cacheKey);
-      console.log(`[Redis] Cache cleared for key: ${cacheKey} due to profile update.`);
-    } catch (redisError) {
-      console.error('Redis error during profile cache deletion:', redisError);
+    if (!currentUser) {
+      throw new UnauthorizedException('You have to login or user not found');
     }
 
-    // 2. Clear Weather Cache if Location Changed
-    const { oldLocation, newLocation } = result;
-    if (oldLocation || newLocation) {
-      const keysToDelete: string[] = [];
+    const {
+      image,
+      dateOfBirth,
+      upazila,
+      district,
+      height,
+      weight,
+      latitude,   // Extracted here
+      longitude,  // Extracted here
+      personalityType,
+      defaultWakeTime,
+      defaultSleepTime,
+      enableIslamicFeatures,
+      enableMailAssistance,
+      enableFinanceTracker,
+      enableHealthTracking,
+      enableScreenTimeTracking,
+      enableAiBriefings,
+      ...restOfDto
+    } = dto;
 
-      if (oldLocation) {
-        keysToDelete.push(`weather:district:${oldLocation.trim().toLowerCase()}`);
-      }
-      if (newLocation && newLocation !== oldLocation) {
-        keysToDelete.push(`weather:district:${newLocation.trim().toLowerCase()}`);
-      }
+    const updateData: any = { ...restOfDto };
 
-      if (keysToDelete.length > 0) {
-        try {
-          await this.redis.del(...keysToDelete);
-          console.log(`[Redis] Weather cache cleared for keys:`, keysToDelete);
-        } catch (weatherRedisErr) {
-          console.error('Redis error during weather cache deletion:', weatherRedisErr);
+    // 1. FIXED: Removed 'latitude' and 'longitude' from sensitive fields
+    const sensitiveFields = [
+      'phone',
+      'type',
+      'status',
+      'isVerified',
+      'password',
+      'firebaseToken',
+    ];
+    sensitiveFields.forEach((field) => {
+      delete updateData[field];
+    });
+
+    // Handle string inputs from multipart/form-data
+    if (upazila && upazila.trim() !== '') updateData.upazila = upazila.trim();
+    if (district && district.trim() !== '') updateData.district = district.trim();
+
+    // 2. Parse Latitude & Longitude from string/number inputs
+    if (latitude !== undefined && latitude !== null && latitude !== '') {
+      const parsedLat = parseFloat(latitude);
+      if (!isNaN(parsedLat)) {
+        updateData.latitude = parsedLat;
+      }
+    }
+
+    if (longitude !== undefined && longitude !== null && longitude !== '') {
+      const parsedLng = parseFloat(longitude);
+      if (!isNaN(parsedLng)) {
+        updateData.longitude = parsedLng;
+      }
+    }
+
+    // Routine & Personality fixes
+    if (defaultWakeTime && defaultWakeTime.trim() !== '') {
+      updateData.defaultWakeTime = defaultWakeTime.trim();
+    }
+    if (defaultSleepTime && defaultSleepTime.trim() !== '') {
+      updateData.defaultSleepTime = defaultSleepTime.trim();
+    }
+    if (personalityType && personalityType !== 'null' && personalityType !== '') {
+      updateData.personalityType = personalityType;
+    } else if (personalityType === null || personalityType === 'null') {
+      updateData.personalityType = null;
+    }
+
+    // Physical metrics number parsing
+    if (height !== undefined && height !== null && height !== '') {
+      const parsedHeight = parseFloat(height);
+      if (!isNaN(parsedHeight)) updateData.height = parsedHeight;
+    }
+    if (weight !== undefined && weight !== null && weight !== '') {
+      const parsedWeight = parseFloat(weight);
+      if (!isNaN(parsedWeight)) updateData.weight = parsedWeight;
+    }
+
+    // Boolean feature flag conversions for form-data strings
+    const parseBool = (val: any) => val === true || val === 'true';
+    if (enableIslamicFeatures !== undefined) updateData.enableIslamicFeatures = parseBool(enableIslamicFeatures);
+    if (enableMailAssistance !== undefined) updateData.enableMailAssistance = parseBool(enableMailAssistance);
+    if (enableFinanceTracker !== undefined) updateData.enableFinanceTracker = parseBool(enableFinanceTracker);
+    if (enableHealthTracking !== undefined) updateData.enableHealthTracking = parseBool(enableHealthTracking);
+    if (enableScreenTimeTracking !== undefined) updateData.enableScreenTimeTracking = parseBool(enableScreenTimeTracking);
+    if (enableAiBriefings !== undefined) updateData.enableAiBriefings = parseBool(enableAiBriefings);
+
+    // Date of birth handling
+    if (dateOfBirth && String(dateOfBirth).trim() !== '') {
+      updateData.dateOfBirth = new Date(dateOfBirth);
+    }
+
+    // File avatar handling
+    if (file) {
+      try {
+        if (currentUser.avatarUrl) {
+          const oldFilename =
+            currentUser.avatarUrl.split('/avatars/')[1] ||
+            currentUser.avatarUrl.split('avatars-dir-token/')[1] ||
+            currentUser.avatarUrl;
+          if (oldFilename) {
+            const oldFilePath = path.join(
+              __dirname,
+              '..',
+              '..',
+              '..',
+              '..',
+              '..',
+              'public',
+              'avatars',
+              oldFilename,
+            );
+            if (fs.existsSync(oldFilePath)) {
+              fs.unlinkSync(oldFilePath);
+              console.log(`Old avatar storage unlinked: ${oldFilename}`);
+            }
+          }
         }
+
+        const savedFileName = await processAndSaveImage(file, 'avatars');
+        updateData.avatarUrl = savedFileName;
+      } catch (imageError) {
+        console.error('Failed to process incoming update avatar file payload:', imageError);
       }
     }
+
+    // Debug log to verify payload before saving to Prisma
+    console.log('[UpdateProfile] Saving to DB updateData:', {
+      latitude: updateData.latitude,
+      longitude: updateData.longitude,
+      location: updateData.location,
+    });
+
+    await tx.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
 
     return {
-      success: true,
-      message: 'Profile and settings updated successfully',
+      oldLocation: currentUser.location,
+      newLocation: updateData.location,
     };
+  });
+
+  // 1. Clear Profile Cache
+  const cacheKey = `user:profile:${userId}`;
+  try {
+    await this.redis.del(cacheKey);
+    console.log(`[Redis] Cache cleared for key: ${cacheKey} due to profile update.`);
+  } catch (redisError) {
+    console.error('Redis error during profile cache deletion:', redisError);
   }
+
+  // 2. Clear Weather Cache if Location Changed
+  const { oldLocation, newLocation } = result;
+  if (oldLocation || newLocation) {
+    const keysToDelete: string[] = [];
+
+    if (oldLocation) {
+      keysToDelete.push(`weather:district:${oldLocation.trim().toLowerCase()}`);
+    }
+    if (newLocation && newLocation !== oldLocation) {
+      keysToDelete.push(`weather:district:${newLocation.trim().toLowerCase()}`);
+    }
+
+    if (keysToDelete.length > 0) {
+      try {
+        await this.redis.del(...keysToDelete);
+      } catch (weatherRedisErr) {
+        console.error('Redis error during weather cache deletion:', weatherRedisErr);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    message: 'Profile and settings updated successfully',
+  };
+}
 
   async completeOAuthProfile(userId: string, dto: CompleteProfileDto, image?: Express.Multer.File) {
     const user = await this.prisma.user.findUnique({

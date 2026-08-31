@@ -344,6 +344,102 @@ export class DashboardService {
     }
   }
 
+  async getPrayerTime(userId: string) {
+    const CACHE_TTL_SECONDS = 3600; // 1 hour
+
+    // 1. Fetch user location & settings
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId },
+      select: {
+        latitude: true,
+        longitude: true,
+        enableIslamicFeatures: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User Not Found');
+    }
+
+    if (user.enableIslamicFeatures !== true) {
+      return {
+        success: false,
+        message: 'Islamic feature not enabled',
+      };
+    }
+
+    if (user.latitude == null || user.longitude == null) {
+      throw new BadRequestException('User location coordinates are missing');
+    }
+
+    // Round coordinates to 2 decimal places (~1.1km precision) to maximize Redis cache sharing
+    const latRounded = Number(user.latitude).toFixed(2);
+    const lngRounded = Number(user.longitude).toFixed(2);
+    const redisKey = `prayer_times:${latRounded}:${lngRounded}`;
+
+    // 2. Check Redis Cache
+    try {
+      const cachedPrayerTimes = await this.redis.get(redisKey);
+      if (cachedPrayerTimes) {
+        return {
+          ...JSON.parse(cachedPrayerTimes),
+          cached: true,
+        };
+      }
+    } catch (redisError) {
+      this.logger.error('Redis read error:', redisError);
+    }
+
+    // 3. Fetch from External API
+    const apiKey = process.env.QURAN_AYAT_API;
+    try {
+      const response = await fetch(
+        `https://ummahapi.com/api/prayer-times?lat=${user.latitude}&lng=${user.longitude}`,
+        {
+          headers: {
+            Accept: 'application/json',
+            ...(apiKey ? { 'x-api-key': apiKey } : {}),
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Prayer time: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error('API returned an unsuccessful status.');
+      }
+
+      const payload = {
+        success: true,
+        data: result.data,
+      };
+
+      // 4. Save to Redis Cache with 1-Hour Expiry
+      try {
+        await this.redis.set(
+          redisKey,
+          JSON.stringify(payload),
+          'EX',
+          CACHE_TTL_SECONDS,
+        );
+      } catch (redisError) {
+        this.logger.error('Redis write error:', redisError);
+      }
+
+      return {
+        ...payload,
+        cached: false,
+      };
+    } catch (error: any) {
+      this.logger.error('Error fetching Prayer Time:', error.message);
+      throw error;
+    }
+  }
+
   private async getAdminDashboard() {
 
   }

@@ -31,6 +31,14 @@ export class DashbordController {
     return this.dashboardService.getWeatherByPlace(userId, latitude, longitude);
   }
 
+  @Get('prayer-time')
+  async getPrayerTime(
+    @Req() req: any
+  ) {
+    const userId = req.user?.userId;
+    return this.dashboardService.getPrayerTime(userId);
+  }
+
   @Get('ayat')
   async getAyat(@Req() req: any){
     const userId=req.user?.userId;

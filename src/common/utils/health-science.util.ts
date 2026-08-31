@@ -174,3 +174,36 @@ export function getOutdoorAdvisory(weather: WeatherContext): AdvisoriesResult {
     insights,
   };
 }
+
+/**
+ * Calculates BMI given height in meters and weight in kg.
+ * Returns null if either metric is missing or invalid.
+ */
+export function calculateBmi(height?: number | null, weight?: number | null): number | null {
+  if (!height || !weight || height <= 0 || weight <= 0) {
+    return null;
+  }
+  const bmi = weight / (height * height);
+  return Number(bmi.toFixed(2));
+}
+
+/**
+ * Calculates current age from DOB.
+ * Returns null if dateOfBirth is missing.
+ */
+export function calculateAge(dateOfBirth?: Date | string | null): number | null {
+  if (!dateOfBirth) return null;
+
+  const dob = new Date(dateOfBirth);
+  if (isNaN(dob.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age--;
+  }
+
+  return age < 0 ? null : age;
+}

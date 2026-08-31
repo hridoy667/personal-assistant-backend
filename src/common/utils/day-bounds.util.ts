@@ -19,73 +19,57 @@ export async function getUserDayBounds(
   const timeZone = userTimeZone || user.timezone || 'UTC';
 
   const [wakeH, wakeM] = (user.defaultWakeTime || '06:00').split(':').map(Number);
-  const [sleepH, sleepM] = (user.defaultSleepTime || '04:00').split(':').map(Number);
+  const [sleepH, sleepM] = (user.defaultSleepTime || '23:00').split(':').map(Number);
 
-  // 1. CONVERT UTC REQUEST TO USER'S ZONED WALL-CLOCK DATE
+  // Convert UTC request to local wall clock
   const zonedNow = toZonedTime(requestDate, timeZone);
-
-  // 2. DETERMINE LOGICAL DATE IN LOCAL TIME
   let logicalZonedDate = new Date(zonedNow);
 
-  // Set wake time on the zoned date
   const zonedWake = new Date(zonedNow);
   zonedWake.setHours(wakeH, wakeM, 0, 0);
 
-  // If current local time is before wake time, shift back 1 logical day
+  // If current time is before wake time (e.g., 02:00 AM), we are still in yesterday's logical day
   if (zonedNow < zonedWake) {
     logicalZonedDate = subDays(logicalZonedDate, 1);
   }
 
-  // 3. CONSTRUCT LOCAL START & END TIMES
+  // Define default local bounds for the logical date
   const localStart = new Date(logicalZonedDate);
   localStart.setHours(wakeH, wakeM, 0, 0);
 
   let localEnd = new Date(logicalZonedDate);
   localEnd.setHours(sleepH, sleepM, 0, 0);
 
-  // If sleep time (e.g. 04:00) is earlier than wake time (e.g. 06:00), it ends tomorrow
   if (sleepH < wakeH || (sleepH === wakeH && sleepM <= wakeM)) {
     localEnd = addDays(localEnd, 1);
   }
 
-  // 4. CONVERT ZONED WALL-CLOCK TIMES BACK TO TRUE UTC FOR PRISMA
   const defaultStart = fromZonedTime(localStart, timeZone);
   const defaultEnd = fromZonedTime(localEnd, timeZone);
 
-  const localStartOfDay = fromZonedTime(startOfDay(logicalZonedDate), timeZone);
-  const localEndOfDay = fromZonedTime(endOfDay(logicalZonedDate), timeZone);
+  // 1. Search wider range (previous day startOfDay to current day endOfDay) to catch night sessions
+  const searchStartWindow = subDays(fromZonedTime(startOfDay(logicalZonedDate), timeZone), 1);
+  const searchEndWindow = addDays(fromZonedTime(endOfDay(logicalZonedDate), timeZone), 1);
 
-  // 5. OVERRIDE WITH SLEEP LOGS IF PRESENT
+  // 2. Fetch active or latest session matching this logical window
   const actualStartLog = await prisma.sleepLog.findFirst({
     where: {
       userId,
-      wokeUpAt: {
-        gte: localStartOfDay,
-        lte: localEndOfDay,
+      sleptAt: {
+        gte: searchStartWindow,
+        lte: searchEndWindow,
       },
     },
-    orderBy: { wokeUpAt: 'desc' },
+    orderBy: { sleptAt: 'desc' },
   });
 
   const dayStart = actualStartLog?.wokeUpAt || defaultStart;
-
-  const actualEndLog = await prisma.sleepLog.findFirst({
-    where: {
-      userId,
-      sleptAt: {
-        gte: dayStart,
-        lte: addDays(dayStart, 1),
-      },
-    },
-    orderBy: { sleptAt: 'asc' },
-  });
-
-  const dayEnd = actualEndLog?.sleptAt || defaultEnd;
+  const dayEnd = actualStartLog?.sleptAt || defaultEnd;
 
   return {
-    logicalDate: localStartOfDay,
+    logicalDate: fromZonedTime(startOfDay(logicalZonedDate), timeZone),
     dayStart,
     dayEnd,
-    isCurrentlyAwake: !actualEndLog?.sleptAt,
+    isCurrentlyAwake: !actualStartLog || actualStartLog.wokeUpAt !== null,
   };
 }

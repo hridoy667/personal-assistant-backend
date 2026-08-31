@@ -41,11 +41,9 @@ export class HealthController {
   @Get('wellbeing')
   @ApiOperation({ summary: 'Get wellbeing context' })
   async getWellbeingInfo(
-    @Req() req: any,
-    @Query('latitude', new ParseFloatPipe({ optional: true })) latitude?: number,
-    @Query('longitude', new ParseFloatPipe({ optional: true })) longitude?: number,
+    @Req() req: any
   ) {
-    return this.healthService.getWellbeingContext(req.user.userId, latitude, longitude);
+    return this.healthService.getWellbeingContext(req.user.userId);
   }
 
   @Get('active')

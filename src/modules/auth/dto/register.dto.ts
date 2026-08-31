@@ -94,11 +94,23 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   upazila?: string;
-  
+
   @ApiPropertyOptional({ example: 'Dhanmondi' })
   @IsOptional()
   @IsString()
   location?: string;
+
+  @ApiPropertyOptional({ example: 23.7461 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  latitude?: number;
+
+  @ApiPropertyOptional({ example: 90.3742 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  longitude?: number;
 
   // --- Routine & Personality ---
 

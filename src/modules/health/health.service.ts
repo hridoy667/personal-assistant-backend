@@ -6,8 +6,9 @@ import { calculateBMR, calculateDynamicHydration, calculateTDEE, getOutdoorAdvis
 import { DashboardService } from '../dashbord/dashboard.service';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
-import { startOfDay, endOfDay, subDays, format, getISOWeek, getMonth } from 'date-fns';
+import { startOfDay, endOfDay, subDays, format, getISOWeek, addDays } from 'date-fns';
 import { getUserDayBounds } from 'src/common/utils/day-bounds.util';
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 
 @Injectable()
 export class HealthService {
@@ -15,7 +16,7 @@ export class HealthService {
     private readonly prisma: PrismaService,
     private readonly dashboardService: DashboardService,
     @InjectRedis() private readonly redis: Redis,
-  ) {}
+  ) { }
 
   private readonly logger = new Logger(HealthService.name);
 
@@ -31,79 +32,110 @@ export class HealthService {
     });
   }
 
-  async getWellbeingContext(userId: string, latitude?: number, longitude?: number) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { height: true, weight: true, dateOfBirth: true, gender: true, activityLevel: true, district: true },
-    });
+  async getWellbeingContext(userId: string) {
+  const user = await this.prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      height: true,
+      weight: true,
+      dateOfBirth: true,
+      gender: true,
+      activityLevel: true,
+      latitude: true,
+      longitude: true,
+      district: true,
+      location: true,
+    },
+  });
 
-    if (!user || !user.height || !user.weight || !user.dateOfBirth) {
-      return { success: false, message: 'Please update your profile.', isUpdateRequired: true };
-    }
-
-    let locationKeySegment = 'default';
-    if (latitude !== undefined && longitude !== undefined) {
-      locationKeySegment = `coords:${latitude.toFixed(2)}:${longitude.toFixed(2)}`;
-    } else if (user.district) {
-      locationKeySegment = `district:${user.district.trim().toLowerCase()}`;
-    }
-    const cacheKey = `wellbeing:user:${userId}:${locationKeySegment}`;
-
-    try {
-      const cachedData = await this.redis.get(cacheKey);
-      if (cachedData) return { ...JSON.parse(cachedData), cached: true };
-    } catch (e) {
-      this.logger.error('Redis read error:', e);
-    }
-
-    const weatherData = await this.dashboardService.getWeatherByPlace(userId, latitude, longitude);
-    
-    // Domain Mappings...
-    const ageYears = calculateAge(user.dateOfBirth);
-    const healthProfile: HealthProfile = {
-      weightKg: user.weight, heightMeters: user.height, ageYears,
-      gender: (user.gender as any) || 'OTHER', activityLevel: (user.activityLevel as any) || 'SEDENTARY',
-    };
-
-    const weatherContext: WeatherContext = {
-      tempFeelsLike: weatherData.thermalComfort.feelsLike,
-      humidity: weatherData.thermalComfort.humidity,
-      pressure: weatherData.mentalAndHealthMetrics.pressure,
-      uvIndex: weatherData.mentalAndHealthMetrics.uvIndex,
-      aqi: weatherData.mentalAndHealthMetrics.airQualityIndex,
-      pm25: weatherData.mentalAndHealthMetrics.pollutants?.pm2_5 ?? null,
-      isDaylight: weatherData.condition.isDaylight,
-      sunrise: weatherData.productivityAndWorkouts.sunrise,
-      sunset: weatherData.productivityAndWorkouts.sunset,
-    };
-
-    const hydration = calculateDynamicHydration(healthProfile, weatherContext);
-    const outdoorAdvisory = getOutdoorAdvisory(weatherContext);
-
-    const wellbeingPayload = {
-      success: true,
-      data: {
-        location: weatherData.location,
-        userProfile: { age: ageYears, bmi: Number((user.weight / (user.height ** 2)).toFixed(1)) },
-        metabolicMetrics: {
-          bmr: calculateBMR(healthProfile),
-          tdee: calculateTDEE(healthProfile, weatherContext),
-        },
-        hydration: { targetMl: hydration.recommendedMl, breakdown: hydration.breakdown },
-        workoutAdvisory: { isOutdoorExerciseRecommended: outdoorAdvisory.isOutdoorExerciseRecommended, warnings: outdoorAdvisory.warnings },
-        healthInsights: outdoorAdvisory.insights,
-        activeWeatherAlerts: weatherData.alertsAndAdvisories.alerts,
-      },
-    };
-
-    try {
-      await this.redis.set(cacheKey, JSON.stringify(wellbeingPayload), 'EX', 5400);
-    } catch (e) {
-      this.logger.error('Redis write error:', e);
-    }
-
-    return { ...wellbeingPayload, cached: false };
+  if (!user || !user.height || !user.weight || !user.dateOfBirth) {
+    return { success: false, message: 'Please update your profile.', isUpdateRequired: true };
   }
+
+  // Parse user stored coordinates
+  const lat = user.latitude !== null && user.latitude !== undefined ? Number(user.latitude) : undefined;
+  const lon = user.longitude !== null && user.longitude !== undefined ? Number(user.longitude) : undefined;
+
+  // Build Redis cache key based on coordinates or location fallback
+  let locationKeySegment = 'default';
+  if (lat !== undefined && lon !== undefined) {
+    locationKeySegment = `coords:${lat.toFixed(2)}:${lon.toFixed(2)}`;
+  } else if (user.district) {
+    locationKeySegment = `district:${user.district.trim().toLowerCase()}`;
+  } else if (user.location) {
+    locationKeySegment = `loc:${user.location.trim().toLowerCase()}`;
+  }
+
+  const cacheKey = `wellbeing:user:${userId}:${locationKeySegment}`;
+
+  try {
+    const cachedData = await this.redis.get(cacheKey);
+    if (cachedData) return { ...JSON.parse(cachedData), cached: true };
+  } catch (e) {
+    this.logger.error('Redis read error:', e);
+  }
+
+  // Fetch weather data using user coordinates
+  const weatherData = await this.dashboardService.getWeatherByPlace(userId, lat, lon);
+
+  // Domain Mappings...
+  const ageYears = calculateAge(user.dateOfBirth);
+  const healthProfile: HealthProfile = {
+    weightKg: user.weight,
+    heightMeters: user.height,
+    ageYears,
+    gender: (user.gender as any) || 'OTHER',
+    activityLevel: (user.activityLevel as any) || 'SEDENTARY',
+  };
+
+  const weatherContext: WeatherContext = {
+    tempFeelsLike: weatherData.thermalComfort.feelsLike,
+    humidity: weatherData.thermalComfort.humidity,
+    pressure: weatherData.mentalAndHealthMetrics.pressure,
+    uvIndex: weatherData.mentalAndHealthMetrics.uvIndex,
+    aqi: weatherData.mentalAndHealthMetrics.airQualityIndex,
+    pm25: weatherData.mentalAndHealthMetrics.pollutants?.pm2_5 ?? null,
+    isDaylight: weatherData.condition.isDaylight,
+    sunrise: weatherData.productivityAndWorkouts.sunrise,
+    sunset: weatherData.productivityAndWorkouts.sunset,
+  };
+
+  const hydration = calculateDynamicHydration(healthProfile, weatherContext);
+  const outdoorAdvisory = getOutdoorAdvisory(weatherContext);
+
+  const wellbeingPayload = {
+    success: true,
+    data: {
+      location: weatherData.location,
+      userProfile: {
+        age: ageYears,
+        bmi: Number((user.weight / user.height ** 2).toFixed(1)),
+      },
+      metabolicMetrics: {
+        bmr: calculateBMR(healthProfile),
+        tdee: calculateTDEE(healthProfile, weatherContext),
+      },
+      hydration: {
+        targetMl: hydration.recommendedMl,
+        breakdown: hydration.breakdown,
+      },
+      workoutAdvisory: {
+        isOutdoorExerciseRecommended: outdoorAdvisory.isOutdoorExerciseRecommended,
+        warnings: outdoorAdvisory.warnings,
+      },
+      healthInsights: outdoorAdvisory.insights,
+      activeWeatherAlerts: weatherData.alertsAndAdvisories.alerts,
+    },
+  };
+
+  try {
+    await this.redis.set(cacheKey, JSON.stringify(wellbeingPayload), 'EX', 5400);
+  } catch (e) {
+    this.logger.error('Redis write error:', e);
+  }
+
+  return { ...wellbeingPayload, cached: false };
+}
 
   async getActiveSleepSession(userId: string) {
     return this.prisma.sleepLog.findFirst({
@@ -128,9 +160,9 @@ export class HealthService {
 
     return this.prisma.sleepLog.update({
       where: { id: sessionId },
-      data: { 
+      data: {
         wokeUpAt: wokeUpAt ? new Date(wokeUpAt) : new Date(),
-        qualityRating 
+        qualityRating
       },
     });
   }
@@ -151,8 +183,8 @@ export class HealthService {
     const logs = await this.prisma.sleepLog.findMany({
       where: {
         userId,
-        sleptAt: { 
-          gte: startOfDay(target), 
+        sleptAt: {
+          gte: startOfDay(target),
           lte: endOfDay(new Date(target.getTime() + 86400000)) // Buffer to catch late night sleeps
         }
       }
@@ -192,37 +224,36 @@ export class HealthService {
     const baseDate = query.date ? new Date(query.date) : new Date();
     const timeframe = query.timeframe || StatsTimeframe.WEEK;
 
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { defaultWakeTime: true, defaultSleepTime: true, timezone: true },
+    });
+
+    const tz = userTimeZone || user?.timezone || 'UTC';
+    const [wakeH, wakeM] = (user?.defaultWakeTime || '06:00').split(':').map(Number);
+
     let startDate: Date;
     let endDate: Date;
 
     if (timeframe === StatsTimeframe.DAY) {
-      // 1. USE USER DAY BOUNDS FOR SINGLE DAY STATS
-      const bounds = await getUserDayBounds(userId, baseDate, userTimeZone);
-      startDate = bounds.dayStart;
-      endDate = bounds.dayEnd;
+      const bounds = await getUserDayBounds(userId, baseDate, tz);
+      // Expand query range slightly (sub 24h) so late-night/evening sleeps are included
+      startDate = subDays(bounds.dayStart, 1);
+      endDate = addDays(bounds.dayEnd, 1);
     } else {
-      // 2. FOR MULTI-DAY TIMEFRAMES, CALCULATE BOUNDS IN USER'S TIMEZONE
-      const currentBounds = await getUserDayBounds(
-        userId,
-        baseDate,
-        userTimeZone,
-      );
-      endDate = currentBounds.dayEnd;
-
       let daysToSub = 6;
       if (timeframe === StatsTimeframe.MONTH) daysToSub = 29;
       if (timeframe === StatsTimeframe.YEAR) daysToSub = 364;
 
+      const currentBounds = await getUserDayBounds(userId, baseDate, tz);
+      endDate = addDays(currentBounds.dayEnd, 1);
+
       const pastBaseDate = subDays(baseDate, daysToSub);
-      const pastBounds = await getUserDayBounds(
-        userId,
-        pastBaseDate,
-        userTimeZone,
-      );
-      startDate = pastBounds.dayStart;
+      const pastBounds = await getUserDayBounds(userId, pastBaseDate, tz);
+      startDate = subDays(pastBounds.dayStart, 1);
     }
 
-    // 3. EXECUTE QUERY WITH TRUE UTC BOUNDS
+    // Fetch sleep records within calculated window
     const logs = await this.prisma.sleepLog.findMany({
       where: {
         userId,
@@ -230,7 +261,6 @@ export class HealthService {
           gte: startDate,
           lte: endDate,
         },
-        wokeUpAt: { not: null },
       },
       orderBy: { sleptAt: 'asc' },
     });
@@ -241,21 +271,37 @@ export class HealthService {
     > = {};
 
     logs.forEach((log) => {
-      // Convert UTC timestamp back into user's timezone context for labeling
-      const logicalDate = this.getLogicalDateObject(log.sleptAt);
+      const effectiveSleptAt = log.sleptAt;
+      let effectiveWokeUpAt: Date;
+
+      if (log.wokeUpAt) {
+        effectiveWokeUpAt = log.wokeUpAt;
+      } else {
+        const zonedSleptAt = toZonedTime(log.sleptAt, tz);
+        const defaultWakeZoned = new Date(zonedSleptAt);
+        defaultWakeZoned.setHours(wakeH, wakeM, 0, 0);
+
+        if (defaultWakeZoned <= zonedSleptAt) {
+          defaultWakeZoned.setDate(defaultWakeZoned.getDate() + 1);
+        }
+        effectiveWokeUpAt = fromZonedTime(defaultWakeZoned, tz);
+      }
+
       const hours =
-        (log.wokeUpAt!.getTime() - log.sleptAt.getTime()) / (1000 * 3600);
+        (effectiveWokeUpAt.getTime() - effectiveSleptAt.getTime()) / (1000 * 3600);
+
+      const logicalDate = effectiveSleptAt;
 
       let key = '';
       if (
         timeframe === StatsTimeframe.DAY ||
         timeframe === StatsTimeframe.WEEK
       ) {
-        key = format(logicalDate, 'EEE'); // "Mon", "Tue"
+        key = format(toZonedTime(logicalDate, tz), 'EEE');
       } else if (timeframe === StatsTimeframe.MONTH) {
-        key = `Week ${getISOWeek(logicalDate)}`;
+        key = `Week ${getISOWeek(toZonedTime(logicalDate, tz))}`;
       } else if (timeframe === StatsTimeframe.YEAR) {
-        key = format(logicalDate, 'MMM'); // "Jan", "Feb"
+        key = format(toZonedTime(logicalDate, tz), 'MMM');
       }
 
       if (!groupedData[key]) {
@@ -268,7 +314,7 @@ export class HealthService {
     return Object.keys(groupedData)
       .map((label) => ({
         label,
-        avgHours: groupedData[label].totalHours / groupedData[label].count,
+        avgHours: Number((groupedData[label].totalHours / groupedData[label].count).toFixed(2)),
       }))
       .sort(
         (a, b) =>

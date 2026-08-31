@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BatchSyncScreenTimeDto } from './dto/screen-time.dto';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
+import { getUserDayBounds } from 'src/common/utils/day-bounds.util';
+import { AppCategory } from '@prisma/client';
 
 @Injectable()
 export class ScreenTimeService {
@@ -11,112 +13,149 @@ export class ScreenTimeService {
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
-  async syncScreenTime(userId: string, dto: BatchSyncScreenTimeDto) {
-    const targetDate = dto.date ? new Date(dto.date) : new Date();
-    targetDate.setUTCHours(0, 0, 0, 0);
+  private sanitizeAppName(packageName?: string, appName?: string): string {
+    const KNOWN_PACKAGES: Record<string, string> = {
+      'com.facebook.katana': 'Facebook',
+      'com.facebook.orca': 'Facebook Messenger',
+      'com.katana': 'Katana',
+      'com.joinblocks': 'Join Blocks',
+      'host.exp.exponent': 'Expo Go',
+      'com.google.android.youtube': 'YouTube',
+      'com.instagram.android': 'Instagram',
+      'com.whatsapp': 'WhatsApp',
+    };
 
-    const dateStr = targetDate.toISOString().split('T')[0];
-    const cacheKey = `screentime:${userId}:${dateStr}`;
-    const deviceOs = dto.deviceOs ?? 'ANDROID';
+    if (packageName && KNOWN_PACKAGES[packageName]) {
+      return KNOWN_PACKAGES[packageName];
+    }
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Upsert total screen time log
-      const screenTimeLog = await tx.screenTimeLog.upsert({
-        where: {
-          userId_date: {
-            userId,
-            date: targetDate,
-          },
-        },
-        update: {
-          totalScreenTimeMins: dto.totalScreenTimeMins,
-          productivityScore: dto.productivityScore,
-          deviceOs: deviceOs as any,
-        },
-        create: {
-          userId,
-          date: targetDate,
-          totalScreenTimeMins: dto.totalScreenTimeMins,
-          productivityScore: dto.productivityScore,
-          deviceOs: deviceOs as any,
-        },
-      });
+    if (appName && appName !== packageName) {
+      return appName.charAt(0).toUpperCase() + appName.slice(1);
+    }
 
-      // 2. Delete existing app usages for re-sync safety
-      await tx.appUsage.deleteMany({
-        where: {
-          userId,
-          date: targetDate,
-        },
-      });
+    if (packageName) {
+      const segment = packageName.split('.').pop() || packageName;
+      return segment.charAt(0).toUpperCase() + segment.slice(1);
+    }
 
-      // 3. Insert app/category usages if present
-      if (dto.appUsages && dto.appUsages.length > 0) {
-        await tx.appUsage.createMany({
-          data: dto.appUsages.map((app) => ({
-            userId,
-            packageName: app.packageName ?? null,
-            // Fallback for iOS category-level sync
-            appName: app.appName ?? app.category ?? 'Uncategorized',
-            category: app.category ?? 'NEUTRAL',
-            timeSpentMins: app.timeSpentMins,
-            date: targetDate,
-          })),
-        });
-      }
-
-      return screenTimeLog;
-    });
-
-    // Cache summary metrics in Redis with 1-hour TTL
-    await this.redis.setex(
-      cacheKey,
-      3600,
-      JSON.stringify({
-        totalMins: dto.totalScreenTimeMins,
-        productivityScore: dto.productivityScore,
-        deviceOs,
-      }),
-    );
-
-    return result;
+    return 'Unknown App';
   }
 
-  async getDailySummary(userId: string, dateStr?: string) {
-    const targetDate = dateStr ? new Date(dateStr) : new Date();
-    targetDate.setUTCHours(0, 0, 0, 0);
+  async syncScreenTime(userId: string, dto: BatchSyncScreenTimeDto) {
+    const requestDate = dto.date ? new Date(dto.date) : new Date();
 
-    const formattedDate = targetDate.toISOString().split('T')[0];
-    const cacheKey = `screentime:${userId}:${formattedDate}`;
+    // 1. Get user's logical day bounds for day-alignment
+    const bounds = await getUserDayBounds(userId, requestDate);
+    const syncDate = bounds.logicalDate;
 
-    const cached = await this.redis.get(cacheKey);
-    const cachedStats = cached ? JSON.parse(cached) : null;
-
-    const screenTime = await this.prisma.screenTimeLog.findUnique({
+    // 2. Upsert total screen time log for the logical date
+    await this.prisma.screenTimeLog.upsert({
       where: {
         userId_date: {
           userId,
-          date: targetDate,
+          date: syncDate,
         },
+      },
+      update: {
+        totalScreenTimeMins: dto.totalScreenTimeMins,
+        productivityScore: dto.productivityScore,
+        deviceOs: dto.deviceOs,
+      },
+      create: {
+        userId,
+        date: syncDate,
+        totalScreenTimeMins: dto.totalScreenTimeMins,
+        productivityScore: dto.productivityScore,
+        deviceOs: dto.deviceOs,
       },
     });
 
+    // 3. Process and aggregate app usages by appName
+    if (dto.appUsages && dto.appUsages.length > 0) {
+      const aggregatedMap = new Map<
+        string,
+        { packageName: string; category: AppCategory; timeSpentMins: number }
+      >();
+
+      for (const usage of dto.appUsages) {
+        const cleanAppName = this.sanitizeAppName(usage.packageName, usage.appName);
+        const existing = aggregatedMap.get(cleanAppName);
+
+        if (existing) {
+          existing.timeSpentMins += usage.timeSpentMins;
+        } else {
+          aggregatedMap.set(cleanAppName, {
+            packageName: usage.packageName || '',
+            category: usage.category || AppCategory.NEUTRAL,
+            timeSpentMins: usage.timeSpentMins,
+          });
+        }
+      }
+
+      // 4. Clear existing app usage entries for this user & logical date to prevent duplicates
+      await this.prisma.appUsage.deleteMany({
+        where: {
+          userId,
+          date: syncDate,
+        },
+      });
+
+      // 5. Insert clean, aggregated app usage list
+      const insertData = Array.from(aggregatedMap.entries()).map(
+        ([appName, data]) => ({
+          userId,
+          date: syncDate,
+          appName,
+          packageName: data.packageName,
+          category: data.category,
+          timeSpentMins: data.timeSpentMins,
+        }),
+      );
+
+      await this.prisma.appUsage.createMany({
+        data: insertData,
+      });
+    }
+
+    return { success: true };
+  }
+
+  async getDailySummary(userId: string, requestDateStr?: string) {
+    const requestDate = requestDateStr ? new Date(requestDateStr) : new Date();
+
+    // 1. Get exact logical bounds for this user
+    const bounds = await getUserDayBounds(userId, requestDate);
+
+    // 2. Query total screen time log matching the logical date
+    const summary = await this.prisma.screenTimeLog.findFirst({
+      where: {
+        userId,
+        date: bounds.logicalDate,
+      },
+    });
+
+    // 3. Query aggregated app usages logged for the logical date
     const appUsages = await this.prisma.appUsage.findMany({
       where: {
         userId,
-        date: targetDate,
+        date: bounds.logicalDate,
+      },
+      select: {
+        packageName: true,
+        appName: true,
+        category: true,
+        timeSpentMins: true,
       },
       orderBy: { timeSpentMins: 'desc' },
     });
 
     return {
-      date: targetDate,
-      summary: screenTime ?? cachedStats ?? {
-        totalScreenTimeMins: 0,
-        productivityScore: null,
-        deviceOs: 'ANDROID',
-      },
+      summary: summary || { totalScreenTimeMins: 0, productivityScore: null },
       appUsages,
+      bounds: {
+        dayStart: bounds.dayStart,
+        dayEnd: bounds.dayEnd,
+      },
     };
   }
 }
