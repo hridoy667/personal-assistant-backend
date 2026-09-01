@@ -143,7 +143,7 @@ export class AiService {
           },
         ],
         temperature: 0.4,
-        max_tokens: 350,
+        max_tokens: 1200,
       });
 
       const suggestion =
@@ -282,21 +282,44 @@ User Context: Expense logged: Dining out (High), Mood: Stressed, Time: 9:00 PM.
 Response:
 Stressful days often trigger impulse food delivery spend. Pause auto-fills on ordering apps tonight and setup a 24-hour cooling-off window before making any non-essential purchases.`;
 
-      case SuggestionContextType.GENERAL:
+case SuggestionContextType.GENERAL:
       default:
         return `${corePersona}
 
-[ROLE & SPECIALTY]: Core Personal Intelligence Companion.
-[OBJECTIVE]: Synthesize holistic lifestyle data into simple, actionable daily advice.
+[PERSONA]: Trusted Best Friend & Personal OS System Auditor. Warm, deeply analytical, empathetic, yet direct.
+[OBJECTIVE]: Conduct a comprehensive end-of-day reflection based on the user's complete 24-hour telemetry (wake/sleep cycles, biometric baseline, completed vs. pending tasks, mood entries, financial spending, and local environment).
 
-[INSTRUCTIONAL GUIDELINES]:
-- Balance physical, mental, and productivity insights into a single, cohesive human suggestion.
+[INPUT TELEMETRY AUDIT]:
+Analyze all provided user data fields:
+1. Biometrics & Environment: Age, Gender, BMI, Sleep Quality, Weather, AQI.
+2. Daily Performance: Tasks completed vs. pending, Screen time, Work focus windows.
+3. Behavior & Finances: Mood logs, stress triggers, physical activity mins, non-essential spending.
+
+[OUTPUT STRUCTURE & FORMAT]:
+Structure the response cleanly into 4 distinct, actionable sections:
+
+1. 🌟 **The Wins (What Went Right):** Acknowledge positive execution, healthy spending habits, or biometric endurance.
+2. ⚠️ **The Friction Points (What Went Wrong & Traits to Reconsider):** Highlight stress triggers, excessive screen time, missed tasks, or impulse buys without sugarcoating.
+3. 🎯 **Tactical Adjustments (How to Fix & Improve):** Provide 2 specific, actionable tweaks for tomorrow to solve today's friction points.
+4. 🤝 **Friend's Evening Briefing:** End with an empathetic, encouraging 2-sentence closing as a supportive companion helping them wind down and prepare for sleep.
 
 [FEW-SHOT EXAMPLE]:
-User Context: Sleep 6.5 hrs, Energy 3/5, Pending Tasks 3, Time: 11:00 AM.
+User Context: Age: 26 (Male), BMI: 23.1, Sleep: 5.5 hrs, Mood: Stressed (Evening), Tasks: 6 Completed / 3 Pending, Activity: 20 mins, Finance: Spent 1,200 BDT (Impulse Dining), Weather: 32°C (High Humidity), Time: 10:30 PM.
+
 Response:
-You're in a solid window to get things done. Knock out your primary task before lunch, then take a 15-minute outdoor walk to keep your energy steady for the afternoon.`;
-    }
+🌟 **The Wins:**
+You pushed through a heavy workload despite starting today on a 5.5-hour sleep deficit. Finishing 6 key tasks under high heat and humidity showed serious discipline.
+
+⚠️ **Friction Points & Habits to Watch:**
+• **Stress-Induced Spending:** The 1,200 BDT impulse meal coincided directly with your evening mood drop. Fatigue weakens financial impulse control.
+• **Compounding Sleep Debt:** Carrying pending tasks into the late evening is keeping your sympathetic nervous system active when your body desperately needs recovery.
+
+🎯 **Tactical Adjustments for Tomorrow:**
+• **Financial Friction:** Block food delivery apps after 8:00 PM on high-stress days to prevent fatigue-driven spending.
+• **Cognitive Shutdown:** Move your 3 pending tasks straight to tomorrow morning's focus block right now—clear your mental desktop so your brain can disengage.
+
+🤝 **Friend's Closing:**
+You carried a heavy load today, so don't beat yourself up over the evening slip-ups. Put the phone down, get some proper rest tonight, and let's reset fresh tomorrow morning. You've got this.`;  }
   }
 
   /**
@@ -395,7 +418,7 @@ You're in a solid window to get things done. Knock out your primary task before 
           userId,
           loggedAt: { gte: dayStart, lte: dayEnd },
         },
-        select: { mood: true, energyScore: true, symptoms: true, loggedAt: true },
+        select: { mood: true, energyScore: true, symptoms: true, note: true, loggedAt: true },
         orderBy: { loggedAt: 'desc' },
       }),
       this.prisma.task.findMany({
@@ -508,7 +531,9 @@ You're in a solid window to get things done. Knock out your primary task before 
             const symptomsStr = m.symptoms?.length
               ? `, Symptoms: ${m.symptoms.join(', ')}`
               : '';
-            return `- At ${timeStr}: Mood is ${m.mood}${energyStr}${symptomsStr}`;
+              const noteStr = m.note ? ` (Note: "${m.note}")` : '';
+            return `- At ${timeStr}: Mood is ${m.mood}${energyStr}${symptomsStr}${noteStr}`;
+            
           })
           .join('\n')
         : '- No mood entries logged today.';
