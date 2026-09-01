@@ -684,13 +684,6 @@ export class AuthService {
       }
     }
 
-    // Debug log to verify payload before saving to Prisma
-    console.log('[UpdateProfile] Saving to DB updateData:', {
-      latitude: updateData.latitude,
-      longitude: updateData.longitude,
-      location: updateData.location,
-    });
-
     await tx.user.update({
       where: { id: userId },
       data: updateData,

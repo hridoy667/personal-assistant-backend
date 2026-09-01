@@ -25,119 +25,112 @@ export class TasksService {
   }
 
   async findAll(userId: string, pagination: PaginationDto) {
-    const { cursor, limit = 10, search, status } = pagination;
-    const where: any = { userId };
+  const { cursor, limit = 10, search } = pagination;
 
-    if (status === TaskStatusFilter.PENDING) {
-      where.isCompleted = false;
-    } else if (status === TaskStatusFilter.COMPLETED) {
-      where.isCompleted = true;
-    }
+  // 1. Force filter to ONLY pending (uncompleted) tasks
+  const where: any = { 
+    userId,
+    isCompleted: false,
+  };
 
-    if (search) {
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { category: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
-    }
+  if (search) {
+    where.OR = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { category: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+    ];
+  }
 
-    // 1. Fetch DB Tasks
-    const [totalTasks, dbTasks] = await Promise.all([
-      this.prisma.task.count({ where }),
-      this.prisma.task.findMany({
-        where,
-        take: limit + 1,
-        cursor: cursor ? { id: cursor } : undefined,
-        skip: cursor ? 1 : 0,
-        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          priority: true,
-          energyRequired: true,
-          isCompleted: true,
-          isTopPriority: true,
-          dueDate: true,
-          category: true,
-          tags: true,
-          createdAt: true,
-          habitId: true,
-          habit: {
-            select: {
-              id: true,
-              type: true,
-              targetValue: true,
-              unit: true,
-              currentStreak: true,
-              longestStreak: true,
-              frequency: true,
-            },
+  // 2. Fetch pending DB Tasks
+  const [totalTasks, dbTasks] = await Promise.all([
+    this.prisma.task.count({ where }),
+    this.prisma.task.findMany({
+      where,
+      take: limit + 1,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : 0,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        priority: true,
+        energyRequired: true,
+        isCompleted: true,
+        isTopPriority: true,
+        dueDate: true,
+        category: true,
+        tags: true,
+        createdAt: true,
+        habitId: true,
+        habit: {
+          select: {
+            id: true,
+            type: true,
+            targetValue: true,
+            unit: true,
+            currentStreak: true,
+            longestStreak: true,
+            frequency: true,
           },
         },
-      }),
-    ]);
-
-    // 2. Fetch habits scheduled for today
-    const todaysHabits = await this.getTodaysHabits(userId);
-
-    // Get set of habitIds that already have tasks generated/completed in DB
-    const existingHabitIds = new Set(
-      dbTasks.filter((t) => t.habitId).map((t) => t.habitId),
-    );
-
-    // 3. Convert unscheduled habits into virtual task format
-    const virtualHabitTasks = todaysHabits
-      .filter((habit) => !existingHabitIds.has(habit.id))
-      .map((habit) => ({
-        id: `virtual-${habit.id}`,
-        title: habit.title,
-        description: null,
-        priority: 'P3_MEDIUM',
-        energyRequired: 'MEDIUM',
-        isCompleted: false,
-        isTopPriority: false,
-        dueDate: new Date(),
-        category: 'HABIT',
-        tags: [],
-        createdAt: habit.createdAt,
-        habitId: habit.id,
-        habit: {
-          id: habit.id,
-          type: habit.type,
-          targetValue: habit.targetValue,
-          unit: habit.unit,
-          currentStreak: habit.currentStreak,
-          longestStreak: habit.longestStreak,
-          frequency: habit.frequency,
-        },
-      }));
-
-    // Filter virtual habits based on status filter if applied
-    let finalVirtualTasks = virtualHabitTasks;
-    if (status === TaskStatusFilter.COMPLETED) {
-      finalVirtualTasks = []; // Virtual items are always pending
-    }
-
-    const combinedTasks = [...dbTasks, ...finalVirtualTasks];
-
-    let nextCursor: string | undefined = undefined;
-    if (combinedTasks.length > limit) {
-      const nextItem = combinedTasks.pop();
-      nextCursor = nextItem?.id;
-    }
-
-    return {
-      success: true,
-      data: combinedTasks,
-      meta: {
-        total: totalTasks + finalVirtualTasks.length,
-        nextCursor,
-        hasNextPage: !!nextCursor,
       },
-    };
+    }),
+  ]);
+
+  // 3. Fetch habits scheduled for today
+  const todaysHabits = await this.getTodaysHabits(userId);
+
+  // Set of habitIds that already have tasks in DB (pending)
+  const existingHabitIds = new Set(
+    dbTasks.filter((t) => t.habitId).map((t) => t.habitId),
+  );
+
+  // 4. Convert unscheduled habits into virtual task format (always uncompleted)
+  const virtualHabitTasks = todaysHabits
+    .filter((habit) => !existingHabitIds.has(habit.id))
+    .map((habit) => ({
+      id: `virtual-${habit.id}`,
+      title: habit.title,
+      description: null,
+      priority: 'P3_MEDIUM',
+      energyRequired: 'MEDIUM',
+      isCompleted: false,
+      isTopPriority: false,
+      dueDate: new Date(),
+      category: 'HABIT',
+      tags: [],
+      createdAt: habit.createdAt,
+      habitId: habit.id,
+      habit: {
+        id: habit.id,
+        type: habit.type,
+        targetValue: habit.targetValue,
+        unit: habit.unit,
+        currentStreak: habit.currentStreak,
+        longestStreak: habit.longestStreak,
+        frequency: habit.frequency,
+      },
+    }));
+
+  const combinedTasks = [...dbTasks, ...virtualHabitTasks];
+
+  let nextCursor: string | undefined = undefined;
+  if (combinedTasks.length > limit) {
+    const nextItem = combinedTasks.pop();
+    nextCursor = nextItem?.id;
   }
+
+  return {
+    success: true,
+    data: combinedTasks,
+    meta: {
+      total: totalTasks + virtualHabitTasks.length,
+      nextCursor,
+      hasNextPage: !!nextCursor,
+    },
+  };
+}
 
   private async getTodaysHabits(userId: string) {
     const days = [

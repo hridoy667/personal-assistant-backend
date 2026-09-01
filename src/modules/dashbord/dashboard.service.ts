@@ -394,7 +394,7 @@ export class DashboardService {
     const apiKey = process.env.QURAN_AYAT_API;
     try {
       const response = await fetch(
-        `https://ummahapi.com/api/prayer-times?lat=${user.latitude}&lng=${user.longitude}`,
+        `https://ummahapi.com/api/prayer-times?lat=${user.latitude}&lng=${user.longitude}&method=Karachi&madhab=Hanafi`,
         {
           headers: {
             Accept: 'application/json',
