@@ -24,6 +24,7 @@ import {
 } from 'src/common/utils/fileUrl.util';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
+import { getUserDayBounds } from 'src/common/utils/day-bounds.util';
 
 
 
@@ -438,6 +439,202 @@ export class DashboardService {
       this.logger.error('Error fetching Prayer Time:', error.message);
       throw error;
     }
+  }
+
+  async getTodayOverview(userId: string){
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        timezone: true,
+        defaultWakeTime: true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const userTimezone = user.timezone || 'UTC';
+    const dayBounds = await getUserDayBounds(
+      userId,
+      new Date(),
+      userTimezone,
+    );
+    const { dayStart, dayEnd, logicalDate, isCurrentlyAwake } = dayBounds;
+
+    const [
+      todayActivities,
+      allTodayMoods,
+      todayScreenTime,
+      todaysTasks,
+      rawTopApps,
+      latestSleep,
+    ] = await Promise.all([
+      // 1. Fetch Today's Activity Logs
+      this.prisma.activityLog.findMany({
+        where: {
+          userId,
+          loggedAt: { gte: dayStart, lte: dayEnd },
+        },
+        select: {
+          id: true,
+          type: true,
+          durationMin: true,
+          note: true,
+          loggedAt: true,
+        },
+        orderBy: { loggedAt: 'asc' },
+      }),
+
+      // 2. Fetch All Mood Logs for Today
+      this.prisma.moodLog.findMany({
+        where: {
+          userId,
+          loggedAt: { gte: dayStart, lte: dayEnd },
+        },
+        select: {
+          id: true,
+          mood: true,
+          energyScore: true,
+          symptoms: true,
+          loggedAt: true,
+        },
+        orderBy: { loggedAt: 'desc' },
+      }),
+
+      // 3. Fetch Total Screen Time
+      this.prisma.screenTimeLog.findFirst({
+        where: {
+          userId,
+          date: logicalDate,
+        },
+        select: { totalScreenTimeMins: true, productivityScore: true },
+      }),
+
+      // 4. Fetch Tasks Due/Completed/Created Today
+      this.prisma.task.findMany({
+        where: {
+          userId,
+          OR: [
+            { dueDate: { gte: dayStart, lte: dayEnd } },
+            { createdAt: { gte: dayStart, lte: dayEnd } },
+            { completedAt: { gte: dayStart, lte: dayEnd } },
+          ],
+        },
+        select: {
+          id: true,
+          title: true,
+          isCompleted: true,
+          priority: true,
+          energyRequired: true,
+          category: true,
+          dueDate: true,
+        },
+        orderBy: { isCompleted: 'asc' },
+      }),
+
+      // 5. Fetch Top App Usage
+      this.prisma.appUsage.findMany({
+        where: {
+          userId,
+          date: logicalDate,
+        },
+        select: { appName: true, category: true, timeSpentMins: true },
+        orderBy: { timeSpentMins: 'desc' },
+      }),
+
+      // 6. Fetch Today's Waking Sleep Log to capture precise Wake Time
+      this.prisma.sleepLog.findFirst({
+        where: {
+          userId,
+          wokeUpAt: { gte: dayStart, lte: dayEnd },
+        },
+        select: { wokeUpAt: true },
+        orderBy: { wokeUpAt: 'desc' },
+      }),
+    ]);
+
+    // Aggregate unique apps and total duration
+    const topAppsMap = new Map<
+      string,
+      { appName: string; category: string | null; timeSpentMins: number }
+    >();
+
+    for (const app of rawTopApps) {
+      const name = app.appName || 'Unknown';
+      if (!topAppsMap.has(name)) {
+        topAppsMap.set(name, {
+          appName: name,
+          category: app.category,
+          timeSpentMins: app.timeSpentMins,
+        });
+      }
+    }
+    const topApps = Array.from(topAppsMap.values()).slice(0, 5);
+
+    // Compute metrics
+    const totalActivityMins = todayActivities.reduce(
+      (sum, act) => sum + (act.durationMin || 0),
+      0,
+    );
+
+    const completedTasksCount = todaysTasks.filter((t) => t.isCompleted).length;
+
+    // Resolve Wake Up Time string (Dynamic log timestamp formatted as HH:mm, or fallback to defaultWakeTime)
+    let actualWakeUpTime = user.defaultWakeTime;
+    if (latestSleep?.wokeUpAt) {
+      actualWakeUpTime = new Date(latestSleep.wokeUpAt).toLocaleTimeString(
+        'en-GB',
+        {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: userTimezone,
+        },
+      );
+    }
+
+    const latestMoodLog = allTodayMoods[0] || null;
+
+    return {
+      dayBounds: {
+        dayStart,
+        dayEnd,
+        logicalDate,
+        isCurrentlyAwake,
+        wakeUpTime: actualWakeUpTime,
+      },
+      mood: {
+        latest: latestMoodLog
+          ? {
+              mood: latestMoodLog.mood,
+              energyScore: latestMoodLog.energyScore,
+              symptoms: latestMoodLog.symptoms,
+              loggedAt: latestMoodLog.loggedAt,
+            }
+          : null,
+        allToday: allTodayMoods.map((m) => ({
+          id: m.id,
+          mood: m.mood,
+          energyScore: m.energyScore,
+          loggedAt: m.loggedAt,
+        })),
+      },
+      tasks: {
+        total: todaysTasks.length,
+        completedCount: completedTasksCount,
+        pendingCount: todaysTasks.length - completedTasksCount,
+        items: todaysTasks,
+      },
+      activities: {
+        totalMinutes: totalActivityMins,
+        count: todayActivities.length,
+        logs: todayActivities,
+      },
+      appUsage: {
+        totalScreenTimeMins: todayScreenTime?.totalScreenTimeMins || 0,
+        productivityScore: todayScreenTime?.productivityScore || null,
+        topApps,
+      },
+    };
   }
 
   private async getAdminDashboard() {

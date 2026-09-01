@@ -13,6 +13,7 @@ export interface VideoMetadata {
   videoId: string;
   title: string;
   description: string;
+  durationInSeconds: number;
   playlistOrder?: number;
   timestamps: ExtractedTimestamp[];
 }
@@ -20,6 +21,19 @@ export interface VideoMetadata {
 export interface ResourceLink {
   title: string;
   url: string;
+}
+
+export interface GeneratedModule {
+  order: number;
+  title: string;
+  theoryText: string;
+  videoId: string | null;
+  videoUrl: string | null;
+  embedUrl: string | null;
+  startSeconds: number;
+  endSeconds: number;
+  docLinks: ResourceLink[];
+  practiceTask: string;
 }
 
 @Injectable()
@@ -41,7 +55,11 @@ export class SkillsAiService {
   /**
    * Main Pipeline
    */
-  async generateRoadmap(title: string, level?: string, resources?: string) {
+  async generateRoadmap(
+    title: string,
+    level?: string,
+    resources?: string,
+  ): Promise<GeneratedModule[]> {
     const input = resources || '';
 
     const playlistIds = this.extractPlaylistIds(input);
@@ -72,7 +90,9 @@ export class SkillsAiService {
 
     // Stage 1C: Automated YouTube Search Fallback if no videos found
     if (allVideoMetadata.length === 0) {
-      this.logger.log(`No user-supplied video resources found. Searching YouTube for top quality resources...`);
+      this.logger.log(
+        `No user-supplied video resources found. Searching YouTube for top quality resources...`,
+      );
       allVideoMetadata = await this.searchTopYoutubeVideos(title, level);
     }
 
@@ -92,25 +112,18 @@ export class SkillsAiService {
     );
   }
 
-  /**
-   * Automatic Search for Top-Performing & Level-Appropriate YouTube Videos
-   */
   private async searchTopYoutubeVideos(title: string, level = 'Beginner'): Promise<VideoMetadata[]> {
     try {
       const normalizedLevel = level.toLowerCase();
       let searchQuery = `${title} full course tutorial`;
-      let durationFilter: 'medium' | 'long' | 'any' = 'medium';
+      let durationFilter: 'medium' | 'long' | 'any' = 'long';
 
-      // Tailor duration & search terms to level
       if (normalizedLevel.includes('advanced')) {
         searchQuery = `${title} advanced masterclass architecture deep dive production`;
-        durationFilter = 'long'; // > 20 minutes for advanced topics
       } else if (normalizedLevel.includes('intermediate')) {
         searchQuery = `${title} intermediate full project tutorial`;
-        durationFilter = 'long'; // > 20 minutes
       } else {
         searchQuery = `${title} beginner crash course tutorial`;
-        durationFilter = 'medium'; // 4 - 20 minutes
       }
 
       this.logger.debug(`Searching YouTube with query: "${searchQuery}" | Duration: ${durationFilter}`);
@@ -121,7 +134,7 @@ export class SkillsAiService {
         type: ['video'],
         videoDuration: durationFilter,
         order: 'relevance',
-        maxResults: 5,
+        maxResults: 3,
       });
 
       const items = searchResponse.data.items || [];
@@ -138,9 +151,6 @@ export class SkillsAiService {
     }
   }
 
-  /**
-   * Search Web Documentation and Articles via Tavily
-   */
   private async fetchTheoryInsightsWithTavily(
     title: string,
     level = 'Beginner',
@@ -176,9 +186,6 @@ export class SkillsAiService {
     }
   }
 
-  /**
-   * Helper: Extract Playlist IDs (list=PL...)
-   */
   private extractPlaylistIds(input: string): string[] {
     const regExp = /[?&]list=([a-zA-Z0-9_-]+)/g;
     const matches = new Set<string>();
@@ -192,9 +199,6 @@ export class SkillsAiService {
     return Array.from(matches);
   }
 
-  /**
-   * Helper: Extract Standalone YouTube Video IDs
-   */
   private extractStandaloneVideoIds(input: string): string[] {
     const regExp =
       /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/g;
@@ -210,9 +214,6 @@ export class SkillsAiService {
     return Array.from(matches);
   }
 
-  /**
-   * Fetch all videos inside a YouTube Playlist
-   */
   private async fetchPlaylistMetadata(playlistId: string): Promise<VideoMetadata[]> {
     try {
       this.logger.debug(`Fetching playlist items for playlistId: ${playlistId}`);
@@ -243,16 +244,13 @@ export class SkillsAiService {
     }
   }
 
-  /**
-   * Batch fetch video details & timestamps
-   */
   private async fetchMultipleYoutubeMetadata(
     videoIds: string[],
     isPlaylist = false,
   ): Promise<VideoMetadata[]> {
     try {
       const response = await this.youtube.videos.list({
-        part: ['snippet', 'statistics'],
+        part: ['snippet', 'statistics', 'contentDetails'],
         id: videoIds,
       });
 
@@ -263,12 +261,16 @@ export class SkillsAiService {
         const videoId = item.id!;
         const title = item.snippet?.title || `Video (${videoId})`;
         const description = item.snippet?.description || '';
+        const isoDuration = item.contentDetails?.duration || 'PT0S';
+        const durationInSeconds = this.parseIso8601Duration(isoDuration);
+
         const timestamps = this.parseTimestampsFromText(videoId, description);
 
         result.push({
           videoId,
           title,
           description,
+          durationInSeconds,
           playlistOrder: isPlaylist ? index + 1 : undefined,
           timestamps,
         });
@@ -284,9 +286,17 @@ export class SkillsAiService {
     }
   }
 
-  /**
-   * Timestamp Parser
-   */
+  private parseIso8601Duration(duration: string): number {
+    const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!match) return 0;
+
+    const hours = parseInt(match[1] || '0', 10);
+    const minutes = parseInt(match[2] || '0', 10);
+    const seconds = parseInt(match[3] || '0', 10);
+
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+
   private parseTimestampsFromText(videoId: string, text: string): ExtractedTimestamp[] {
     const timestamps: ExtractedTimestamp[] = [];
     const lines = text.split('\n');
@@ -317,9 +327,6 @@ export class SkillsAiService {
     return timestamps;
   }
 
-  /**
-   * Stage 3: Multi-Video & Web Search Context Aware Groq Generator
-   */
   private async generateModulesWithGroq(
     title: string,
     level?: string,
@@ -327,7 +334,7 @@ export class SkillsAiService {
     videos: VideoMetadata[] = [],
     webTheoryContext = '',
     tavilyDocLinks: ResourceLink[] = [],
-  ) {
+  ): Promise<GeneratedModule[]> {
     let videoContext = '';
 
     if (videos.length > 0) {
@@ -337,12 +344,13 @@ export class SkillsAiService {
           const tsText =
             v.timestamps.length > 0
               ? JSON.stringify(v.timestamps, null, 2)
-              : 'No timestamps in description.';
+              : 'No manual timestamps found in description.';
 
           return `--- VIDEO ${idx + 1}: ${orderPrefix}${v.title} ---
 ID: ${v.videoId}
+Duration (seconds): ${v.durationInSeconds} (${Math.floor(v.durationInSeconds / 60)} minutes)
 Description Summary: ${v.description.slice(0, 300)}...
-Timestamps:
+Parsed Timestamps:
 ${tsText}`;
         })
         .join('\n\n');
@@ -351,9 +359,9 @@ ${tsText}`;
     }
 
     const prompt = `
-You are a world-class technical curriculum designer creating a hyper-effective, high-yield learning roadmap for: "${title}".
+You are a world-class technical curriculum designer creating a hyper-effective learning roadmap for: "${title}".
 Target Student Level: ${level || 'Beginner'}.
-User Context / Preferences: "${resources || 'None provided'}".
+User Preferences: "${resources || 'None provided'}".
 
 ==================================================
 AVAILABLE VIDEO RESOURCES (${videos.length} Total Videos):
@@ -362,53 +370,41 @@ ${videoContext}
 AUTHORITATIVE WEB & THEORY CONTEXT (TAVILY):
 ${webTheoryContext || 'No additional web theory gathered.'}
 
-AVAILABLE DOCUMENTATION / HELPFUL RESOURCE LINKS:
+AVAILABLE DOCUMENTATION / RESOURCE LINKS:
 ${JSON.stringify(tavilyDocLinks, null, 2)}
 ==================================================
 
-CORE PEDAGOGICAL PHILOSOPHY (THE 70/30 RULE):
-Design the roadmap around the Pareto Principle of Learning: Focus heavily on the core 70% foundational building blocks, critical paradigms, and practical primitives. Mastering this core unlocks the remaining 30% advanced edge-cases naturally. Do NOT waste modules on obscure tools or ultra-niche concepts early on.
-
-CHAIN-OF-THOUGHT INSTRUCTIONS:
-Before constructing the final output, reason through these steps internally:
-1. Identify the Core 70%: What are the essential foundational topics in "${title}" that the student MUST master at the ${level || 'Beginner'} level?
-2. Resource Mapping: Map the provided video timestamps, documentation links, and Tavily theory notes to these core topics in logical sequence.
-3. High-Yield Progression: Group into 4 to 8 non-redundant modules that build linearly from basic primitives to practical application.
+STRICT TIMECODE MANDATE:
+1. Break down the topic into 4 to 6 non-overlapping sequential modules.
+2. For EVERY module, you MUST return valid numeric values for "startSeconds" and "endSeconds".
+3. IF A VIDEO HAS NO DESCRIPTION TIMESTAMPS:
+   - Divide its total "Duration (seconds)" evenly across the modules using math.
+   - Example (Full video = 3000 seconds across 4 modules):
+     - Module 1: startSeconds = 0, endSeconds = 750
+     - Module 2: startSeconds = 750, endSeconds = 1500
+     - Module 3: startSeconds = 1500, endSeconds = 2250
+     - Module 4: startSeconds = 2250, endSeconds = 3000
 
 INSTRUCTIONS FOR MODULE CREATION:
-1. Group the available resources into 4 to 8 logical, progressive learning modules.
-2. For EACH module, generate:
-   - "title": Clear, actionable module title focused on core mastery.
-   - "theoryText": Synthesize video timestamps and web documentation into a clear overview with TWO sections:
-     🔥 Warm-Up Overview: 2-3 conceptual sentences introducing the core mental model before watching.
-     💡 Key Concepts: 3-4 concise bullet points summarizing the highest-yield takeaways.
-   - "videoUrl": Direct link to the primary starting video/timestamp for this module. Format: "https://www.youtube.com/watch?v={videoId}&t={seconds}s".
-   - "docLinks": An array of 1 to 3 relevant documentation or helpful resource objects with "title" and "url" properties (drawn from Tavily results or official documentation).
-   - "practiceTask": A specific, hands-on project or task targeted at the ${level || 'Beginner'} level to solidify the core 70% rule.
+- "title": Actionable module title.
+- "theoryText": Overview with TWO sections:
+  🔥 Warm-Up Overview: 2-3 conceptual sentences introducing the core mental model before watching.
+  💡 Key Concepts: 3-4 concise bullet points summarizing the highest-yield takeaways.
+- "videoId": The selected video ID string.
+- "startSeconds": Start timestamp in seconds (integer).
+- "endSeconds": End timestamp in seconds (integer, strictly greater than startSeconds).
+- "docLinks": Array of 1 to 3 relevant documentation objects with "title" and "url".
+- "practiceTask": A specific hands-on exercise.
 
-FEW-SHOT EXAMPLES:
-
-Example Input: Title = "NestJS", Level = "Advanced"
-Example Output Module:
-{
-  "title": "Module 1: Advanced Microservices Architecture & Custom Transporters",
-  "theoryText": "🔥 Warm-Up Overview:\\nNestJS microservices abstract underlying transport mechanisms like gRPC, NATS, and Kafka behind a unified message-driven pattern. Master custom transporters and hybrid applications to build scalable, distributed systems.\\n\\n💡 Key Concepts:\\n• Implementing ClientProxy and Custom Server Transporters\\n• Event pattern vs Request-Response pattern communication\\n• Exception Filters and Interceptors in RPC microservice context",
-  "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120s",
-  "docLinks": [
-    { "title": "NestJS Microservices Overview", "url": "https://docs.nestjs.com/microservices/basics" },
-    { "title": "NestJS Custom Transporters Guide", "url": "https://docs.nestjs.com/microservices/custom-transport" }
-  ],
-  "practiceTask": "Build a hybrid HTTP + gRPC NestJS service that handles order processing asynchronously using a custom Redis message transporter with dead-letter queue handling."
-}
-
-CRITICAL REQUIREMENT:
-Return ONLY a valid JSON object matching this schema:
+REQUIRED JSON OUTPUT FORMAT:
 {
   "modules": [
     {
       "title": "Module Title",
       "theoryText": "🔥 Warm-Up Overview:\\nIntroductory sentences...\\n\\n💡 Key Concepts:\\n• Concept 1\\n• Concept 2\\n• Concept 3",
-      "videoUrl": "https://www.youtube.com/watch?v=VIDEO_ID&t=0s",
+      "videoId": "VIDEO_ID_HERE",
+      "startSeconds": 0,
+      "endSeconds": 750,
       "docLinks": [
         { "title": "Documentation Title", "url": "https://example.com/docs" }
       ],
@@ -418,7 +414,7 @@ Return ONLY a valid JSON object matching this schema:
 }
 `;
 
-    this.logger.debug(`Sending multi-video & web context prompt to Groq model: openai/gpt-oss-120b`);
+    this.logger.debug(`Sending prompt to Groq model: openai/gpt-oss-120b`);
 
     try {
       const chatCompletion = await this.groq.chat.completions.create({
@@ -434,23 +430,42 @@ Return ONLY a valid JSON object matching this schema:
       const rawModules =
         parsed.modules || parsed.data || (Array.isArray(parsed) ? parsed : []);
 
-      return rawModules.map((mod: any, index: number) => ({
-        order: index + 1,
-        title: String(mod.title || `Module ${index + 1}`),
-        theoryText: Array.isArray(mod.theoryText)
-          ? mod.theoryText.join('\n• ')
-          : String(mod.theoryText || ''),
-        videoUrl: mod.videoUrl ? String(mod.videoUrl) : null,
-        docLinks: Array.isArray(mod.docLinks)
-          ? mod.docLinks.map((link: any) => ({
-              title: String(link.title || 'Official Documentation'),
-              url: String(link.url || '#'),
-            }))
-          : [],
-        practiceTask: String(
-          mod.practiceTask || 'Review concepts and complete exercise.',
-        ),
-      }));
+      return rawModules.map((mod: any, index: number) => {
+        const vId = mod.videoId ? String(mod.videoId) : null;
+        const startSec = Math.max(0, parseInt(mod.startSeconds, 10) || 0);
+        const fallbackEndSec = (videos[0]?.durationInSeconds || 1800);
+        const endSec = Math.max(startSec + 60, parseInt(mod.endSeconds, 10) || fallbackEndSec);
+
+        const videoUrl = vId
+          ? `https://www.youtube.com/watch?v=${vId}&t=${startSec}s`
+          : null;
+
+        const embedUrl = vId
+          ? `https://www.youtube.com/embed/${vId}?start=${startSec}&end=${endSec}&autoplay=0`
+          : null;
+
+        return {
+          order: index + 1,
+          title: String(mod.title || `Module ${index + 1}`),
+          theoryText: Array.isArray(mod.theoryText)
+            ? mod.theoryText.join('\n• ')
+            : String(mod.theoryText || ''),
+          videoId: vId,
+          videoUrl,
+          embedUrl,
+          startSeconds: startSec,
+          endSeconds: endSec,
+          docLinks: Array.isArray(mod.docLinks)
+            ? mod.docLinks.map((link: any) => ({
+                title: String(link.title || 'Official Documentation'),
+                url: String(link.url || '#'),
+              }))
+            : [],
+          practiceTask: String(
+            mod.practiceTask || 'Review concepts and complete exercise.',
+          ),
+        };
+      });
     } catch (error: any) {
       this.logger.error(
         'Groq API call or JSON parsing failed',

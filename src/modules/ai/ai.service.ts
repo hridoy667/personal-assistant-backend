@@ -86,7 +86,7 @@ export class AiService {
     // 2. Build Unified User Context
     let finalUserContext = '';
     const autoDbContext = await this.generateUserContext(userId);
-
+    console.log('Auto-generated DB context:', autoDbContext);
     if (providedContext) {
       finalUserContext = `[DIRECT INPUT CONTEXT]:\n${providedContext}\n\n[BACKGROUND USER SNAPSHOT]:\n${autoDbContext}`;
     } else {
@@ -175,37 +175,39 @@ VOICE & TONE GUIDELINES:
 REASONING & DATA HIERARCHY EVALUATION:
 1. SENSE THE MOMENT: Read the current local time, wake/sleep status, and environmental conditions first to establish real-world constraints.
 2. SYNTHESIZE KEY DATA: Prioritize core domain parameters first, then layer secondary context to uncover real root causes (e.g., connect poor sleep or long screen time to lower mood).
-3. FORMULATE HUMAN ADVICE: Offer real-world guidance, practical resets, or sensible cautions tailored to their exact situation.`;
+3. FORMULATE HUMAN ADVICE: Offer real-world guidance, guidence for betterment, practical resets, or sensible cautions tailored to their exact situation.`;
 
     switch (contextType) {
       case SuggestionContextType.PHYSICAL_ACTIVITY:
         return `${corePersona}
 
 [ROLE & SPECIALTY]: Practical Movement & Recovery Coach.
-[OBJECTIVE]: Analyze physical movement logs, active tasks, profile biometrics, time of day, and environmental conditions to deliver context-aware workout, recovery, or lifestyle advice.
+[OBJECTIVE]: Synthesize today's logged activities with pending task demands to prescribe specific workout timings, active breaks, or recovery strategies.
 
 [DATA EVALUATION HIERARCHY]:
-• PRIMARY CONTEXT: Today's Logged Activities (types, durations, note timing) + Pending Tasks (priority and energy demands).
-• SECONDARY CONTEXT: User Profile (BMI, Age, Gender, Personality Type).
-• ENVIRONMENT & TIME: Current Local Time, Weather, Air Quality, and Temperature.
+• PRIMARY ANCHORS (MUST DRIVE THE RESPONSE): Logged Activities (types, durations) + Pending Tasks (priority, energy demands) + Current Local Time.
+• SECONDARY Context: User Profile (BMI, Age, Gender, Personality).
+• TERTIARY Context (Use ONLY as background constraints): Weather & Environment.
 
 [INSTRUCTIONAL GUIDELINES]:
-- Priority 1: Check the Current Local Time and Physical Activity Logs first. If it is late at night (e.g., midnight to 5 AM), recommend immediate rest or sleep rather than physical exercise or high-energy tasks.
-- Priority 2: Evaluate today's logged activities alongside pending tasks. Match exercise recommendations to their remaining daily energy budget.
-- Priority 3: Factor in BMI, age, gender, and personality. (For high-BMI or low-energy states, prefer gentle mobility or walks; for introverts/high-stress users, suggest solo or calming routines).
-- Priority 4: Adapt to external weather (e.g., suggest indoor movement during heavy rain or intense heat; outdoors during ideal weather).
+- Rule 1 (Activity & Task Alignment): Directly mention their completed activities and relate them to their pending tasks. Example: "You've spent 2 hours doing [X Activity], but still have [Y Task] pending..."
+- Rule 2 (Time-of-Day Overrides): If local time is past 10 PM / late night, DO NOT suggest workouts. Tell them to rest so they can hit their remaining tasks tomorrow.
+- Rule 3 (Weather as a Constraint, NOT the Topic): Never make weather or hydration the main point. Treat weather strictly as a background variable (e.g., if it's raining, keep the movement recommendation indoors).
+
+[STRICT ANTI-PATTERNS - DO NOT DO THE FOLLOWING]:
+- DO NOT default to generic wellness advice like "drink water", "stay hydrated", or "take deep breaths" unless heat stroke/dehydration symptoms are explicitly logged.
+- DO NOT spend more than 5-10 words mentioning weather conditions.
 
 [FEW-SHOT EXAMPLES]:
 
-User Context: Time: 1:15 AM, Logged Activities: 0 mins, Tasks: 3 pending (High priority), BMI: 27.2, Age: 26, Male, Personality: INTJ.
+User Context: Time: 1:15 AM, Logged Activities: 120m (Coding), Tasks: 3 pending (High priority), BMI: 27.2.
 Response:
-Bro, it's 1:15 AM. Trying to push through your high-priority tasks right now will only tank tomorrow's focus. Shut down the screen, lock in some sleep, and we'll tackle those high-energy tasks fresh in the morning.
+You've already put in 2 hours of heavy focus time tonight, and it's past 1 AM. Trying to grind through your remaining 3 high-priority tasks now will ruin tomorrow's energy. Shut down the screen and get to sleep so you can tackle them fresh.
 
-User Context: Time: 5:30 PM, Logged Activities: 0 mins, Tasks: 2 pending, BMI: 24.1, Age: 29, Female, Personality: ENFP, Weather: 32°C High Humidity.
+User Context: Time: 5:30 PM, Logged Activities: 0 mins (Sitting all day), Tasks: 2 pending (High energy required), BMI: 24.1, Weather: 32°C High Humidity.
 Response:
-• **Late Afternoon Movement:** You've been stationary all day and it's hot outside. Do a quick 15-minute indoor mobility or bodyweight session to get blood flowing before finish off your remaining tasks.
-• **Evening Wind-Down:** Drink a full glass of water with electrolytes now to recover from the heat index before your final evening focus block.`;
-
+• **Pre-Task Activation:** You haven't logged any physical movement today and have 2 high-energy tasks left to complete. Do a quick 10-minute indoor mobility routine right now to break up the static sitting and get blood flowing to your brain.
+• **Task Execution Window:** Once refreshed, dive straight into your highest priority task while that post-movement energy spike lasts, keeping workout intensity light until your work queue is clear.`;
       case SuggestionContextType.MENTAL_HEALTH:
         return `${corePersona}
 
@@ -253,7 +255,7 @@ Response:
       case SuggestionContextType.TASK_OPTIMIZATION:
         return `${corePersona}
 
-[ROLE & SPECIALTY]: Ergonomics & Focus Architect.
+[ROLE & SPECIALTY]: Ergonomics,Task organizer,Productivity coach & Focus Architect.
 [OBJECTIVE]: Analyze task queues, screen time metrics, and current time to recommend optimal focus blocks and distraction-control strategies.
 
 [INSTRUCTIONAL GUIDELINES]:
@@ -372,11 +374,11 @@ You're in a solid window to get things done. Knock out your primary task before 
     // Resolved array positions strictly match the destructuring array below
     const [
       todayActivities,
-      latestMood,
-      todayScreenTime,
+      todayMoods,
       todaysTask,
       todaysFinance,
       rawTopApps,
+      todayScreenTime,
       recentSleep,
       weatherContext,
     ] = await Promise.all([
@@ -388,20 +390,13 @@ You're in a solid window to get things done. Knock out your primary task before 
         select: { type: true, durationMin: true, note: true, loggedAt: true },
         orderBy: { loggedAt: 'asc' },
       }),
-      this.prisma.moodLog.findFirst({
+      this.prisma.moodLog.findMany({
         where: {
           userId,
           loggedAt: { gte: dayStart, lte: dayEnd },
         },
-        select: { mood: true, energyScore: true, symptoms: true },
+        select: { mood: true, energyScore: true, symptoms: true, loggedAt: true },
         orderBy: { loggedAt: 'desc' },
-      }),
-      this.prisma.screenTimeLog.findFirst({
-        where: {
-          userId,
-          date: logicalDate,
-        },
-        select: { totalScreenTimeMins: true, productivityScore: true },
       }),
       this.prisma.task.findMany({
         where: {
@@ -440,6 +435,13 @@ You're in a solid window to get things done. Knock out your primary task before 
         select: { appName: true, category: true, timeSpentMins: true },
         orderBy: { timeSpentMins: 'desc' },
       }),
+      this.prisma.screenTimeLog.findFirst({
+        where: {
+          userId,
+          date: logicalDate,
+        },
+        select: { totalScreenTimeMins: true, productivityScore: true },
+      }),
       this.prisma.sleepLog.findFirst({
         where: {
           userId,
@@ -456,6 +458,9 @@ You're in a solid window to get things done. Knock out your primary task before 
         )
         .catch(() => null),
     ]);
+
+    // Derive latest mood entry for summary header
+    const latestMood = todayMoods[0] || null;
 
     const topAppsMap = new Map<
       string,
@@ -487,6 +492,26 @@ You're in a solid window to get things done. Knock out your primary task before 
       (sum, act) => sum + (act.durationMin || 0),
       0,
     );
+
+    const moodTimeline =
+      todayMoods.length > 0
+        ? todayMoods
+          .map((m) => {
+            const timeStr = new Date(m.loggedAt).toLocaleTimeString('en-US', {
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true,
+              timeZone: user.timezone || 'UTC',
+            });
+            const energyStr =
+              m.energyScore !== null ? `, Energy Score: ${m.energyScore}/5` : '';
+            const symptomsStr = m.symptoms?.length
+              ? `, Symptoms: ${m.symptoms.join(', ')}`
+              : '';
+            return `- At ${timeStr}: Mood is ${m.mood}${energyStr}${symptomsStr}`;
+          })
+          .join('\n')
+        : '- No mood entries logged today.';
 
     const activityTimeline =
       todayActivities.length > 0
@@ -576,6 +601,9 @@ You're in a solid window to get things done. Knock out your primary task before 
 - Sleep: ${sleepDurationHours ? `${sleepDurationHours} hrs logged` : 'No sleep logged today'} (Quality: ${recentSleep?.qualityRating ?? 'N/A'}/5).
 
 ${weatherText}
+
+MOOD LOGS TODAY (${todayMoods.length} total):
+${moodTimeline}
 
 TASKS FOR TODAY (${todaysTask.length} total):
 ${taskSummary}

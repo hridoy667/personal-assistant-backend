@@ -40,8 +40,14 @@ export class DashbordController {
   }
 
   @Get('ayat')
-  async getAyat(@Req() req: any){
-    const userId=req.user?.userId;
+  async getAyat(@Req() req: any) {
+    const userId = req.user?.userId;
     return this.dashboardService.getQuranAyat(userId)
+  }
+
+  @Get('today')
+  async getTodayOverview(@Req() req: any){
+    const userId = req.user?.userId;
+    return this.dashboardService.getTodayOverview(userId);
   }
 }
